@@ -42,11 +42,16 @@ except ImportError:
             class BaseMemory:  # type: ignore[no-redef]
                 """Minimal stub: accepts field kwargs and sets them as attributes."""
                 def __init__(self, **kwargs: object) -> None:
-                    # Apply class-level defaults, then override with kwargs.
+                    # Apply class-level field defaults (skip properties, methods,
+                    # and descriptors which can't be set as instance attributes).
+                    _skip = (property, classmethod, staticmethod)
                     for cls in reversed(type(self).__mro__):
-                        for name, default in vars(cls).items():
-                            if not name.startswith("_") and not callable(default):
-                                object.__setattr__(self, name, default)
+                        for name, value in vars(cls).items():
+                            if name.startswith("_"):
+                                continue
+                            if callable(value) or isinstance(value, _skip):
+                                continue
+                            object.__setattr__(self, name, value)
                     for key, value in kwargs.items():
                         object.__setattr__(self, key, value)
 
