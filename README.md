@@ -1,226 +1,261 @@
 # MuninnDB
 
-**The world's first cognitive database. Memory, not storage.**
+**Memory that strengthens with use, decays when ignored, and pushes to you when it matters — accessible over MCP, REST, gRPC, or SDK.**
 
-![Go Version](https://img.shields.io/badge/go-1.22%2B-blue)
-![License](https://img.shields.io/badge/license-Apache%202.0-green)
-![Status](https://img.shields.io/badge/status-alpha-orange)
+[![CI](https://github.com/scrypster/muninndb/actions/workflows/ci.yml/badge.svg)](https://github.com/scrypster/muninndb/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![Go](https://img.shields.io/badge/go-1.22%2B-00ADD8)](https://go.dev)
+[![Status](https://img.shields.io/badge/status-alpha-orange)](https://github.com/scrypster/muninndb/releases)
 
----
-
-## What this is
-
-Every database you have ever used stores data and waits to be asked.
-
-MuninnDB stores memory. It knows what matters right now, what connects to what, what you have forgotten, and it tells you before you ask. It continuously recalculates relevance as time passes. It discovers associations you never defined. When something becomes important, it pushes that memory to you.
-
-This is what the human brain does. No database has ever done this.
+> **Prerequisites:** None. Single binary, zero dependencies, zero configuration required.
+> To uninstall: `rm $(which muninn)` and delete `~/.muninn`.
 
 ---
 
-## Every other database gets this wrong
-
-| Database Type | What it does | What it can't do |
-|---|---|---|
-| **Relational** (Postgres, MySQL) | Stores structured rows. Queries by exact match or index. | Doesn't know two rows are semantically related. Doesn't know one is more important today than it was last week. Relevance is not a concept it has. |
-| **Document** (MongoDB, Firestore) | Stores JSON blobs. Queries by fields. Flexible schema. | Same fundamental problem. No sense of time. No sense of relevance. No associations between documents unless you build them yourself and maintain them forever. |
-| **Key-Value** (Redis, DynamoDB) | Blazing fast lookups by key. Simple, predictable, fast. | Zero context. Zero relationships. Zero memory of what matters. The database has no idea what it's holding. |
-| **Graph** (Neo4j, Amazon Neptune) | Models relationships between nodes. Traverses connections. | Relationships are static. Hand-defined. They don't strengthen or weaken. There's no decay. No relevance scoring. The graph doesn't learn — you update it manually or it stays wrong. |
-| **Vector** (Pinecone, Weaviate, pgvector) | Finds semantically similar content via embeddings. | Great at "find similar." Cannot tell you what's relevant *right now* given your current context. No decay. No push delivery. No cognitive model. Similarity is not memory. |
-| **MuninnDB** | Stores memory traces (engrams). Knows what's relevant now. Pushes to you when something matters. Learns which concepts connect. Forgets what you no longer need. | This is the new category. |
-
-The problem is not that other databases are slow. Postgres is fast. Redis is extremely fast. The problem is that they are solving the wrong problem.
-
-They are libraries. A library holds everything perfectly and returns exactly what you ask for. That is valuable. But a library does not know which book you need before you know you need it. A library does not notice that two books are about the same idea. A library does not forget the books that no longer matter to your work.
-
-MuninnDB is a brain. It holds memory, tracks relevance, discovers connections, and initiates contact when something matters. That is a different thing entirely.
-
----
-
-## The code moment
-
-Three things are about to happen that no other database in the world can do.
-
-```go
-// Tell MuninnDB something
-err := mem.Remember(ctx, "payment service",
-    "We switched to idempotency keys after the double-charge incident in Q3")
-
-// Ask it what's relevant RIGHT NOW
-results, err := mem.Activate(ctx, "debugging the payment retry logic")
-// Returns the Q3 incident — even though you never mentioned it.
-// MuninnDB connected the concepts. No query. No join. No index hint.
-
-// Watch for memories that become relevant as your work evolves
-mem.Watch(ctx, "payment service", func(e muninn.Engram) {
-    fmt.Printf("Relevant: %s (%.0f%% confidence)\n", e.Concept, e.Confidence*100)
-})
-// The DB pushes to you. You don't poll. You don't query. It remembers.
-```
-
-1. `Activate` retrieved a memory by *meaning and context* — not by field, not by key, not by vector distance alone. It understood that "payment retry logic" and "idempotency keys after a double-charge incident" are the same conversation.
-2. The connection between those two concepts was *inferred*. You never defined it. You never created a relationship in a schema. The association emerged from co-activation and semantic proximity.
-3. The `Watch` call means the database will push future relevant memories to you — without you asking — because relevance changed. Time passed. Related things were activated. A contradiction was found. MuninnDB initiates. You receive.
-
----
-
-## This is not a wrapper
-
-MuninnDB is built from scratch. Every core component is purpose-built for cognitive memory.
-
-**Built from scratch:**
-
-- **ERF (Engram Record Format)** — a custom binary storage format designed specifically for cognitive memory traces. Not JSON. Not protobuf on disk. A purpose-built format with decay scores, association weights, and confidence values baked into every record at the byte level. The format itself encodes time.
-
-- **MBP (Muninn Binary Protocol)** — a custom TCP wire protocol. Not REST with extra steps. A pipelined binary protocol with correlation IDs, designed for sub-10ms memory operations. Every frame knows what request it belongs to. Responses arrive out of order and are reassembled correctly at the client. This is not a design you can bolt onto an existing protocol.
-
-- **6-phase Activation Engine** — a query pipeline that runs full-text search, vector search, and decay scoring in parallel, then fuses the results with Reciprocal Rank Fusion, applies Hebbian co-activation boosts, traverses the association graph with BFS, and scores by confidence — in under 20ms. This is not a feature of any existing database engine. It is the engine.
-
-- **Cognitive workers** — async goroutines that continuously run Ebbinghaus decay, Hebbian learning, Bayesian confidence updating, and contradiction detection in the background. While you are working, the database is working. Relevance scores are recalculating. Associations are strengthening or weakening. Confidence is being updated. The database gets smarter while you are not looking.
-
-- **Semantic trigger system** — a pub/sub primitive native to the database itself. When any memory crosses a relevance threshold — because time passed, because you activated related things, because a contradiction was detected — the database pushes to your subscriber. No polling. No cron job. No external message queue. The database initiates.
-
-**Pebble is our filesystem.** We use CockroachDB's Pebble as the raw key-value layer — the same way Postgres uses the operating system's filesystem. Pebble stores bytes reliably. Everything above that — the cognitive architecture, the indexes, the wire protocols, the storage format, the activation engine — is MuninnDB.
-
----
-
-## Five things that make it different
-
-**1. Memory Decay**
-
-Your brain knows that a memory you haven't touched in months matters less than something you thought about yesterday. MuninnDB knows this too. It continuously recalculates relevance using the Ebbinghaus forgetting curve — a formula derived from 19th-century memory research that describes, with mathematical precision, how biological memory fades over time. Every engram has a decay score. That score changes whether or not you do anything. The database moves.
-
-*Technically: Ebbinghaus decay is applied by background cognitive workers on a continuous schedule, adjusting the relevance weight of every engram based on time since last activation and original encoding strength.* [How memory works](docs/how-memory-works.md)
-
----
-
-**2. Hebbian Association**
-
-"Neurons that fire together, wire together." Hebb's Rule, 1949. When two memories are retrieved together repeatedly, their connection strengthens automatically. You don't define relationships. You don't maintain a schema of associations. You don't write a migration when two concepts start traveling together. The associations emerge from use — and they fade when use stops.
-
-*Technically: Co-activation events are recorded in the association graph. Edge weights are updated using a Hebbian learning function applied by the cognitive worker layer. Weights increase on co-activation and decay symmetrically with the Ebbinghaus function.* [Cognitive primitives](docs/cognitive-primitives.md)
-
----
-
-**3. Semantic Push Triggers**
-
-This is the one that has no analogue anywhere else. You subscribe to a context. The database tells you when something becomes relevant to that context. Not because you queried. Because relevance *changed* — time passed, related memories were activated by someone else, a contradiction was discovered, a new memory was added that connects to your context. The database is the initiator. You are the receiver.
-
-*Technically: The trigger system evaluates subscriptions against the cognitive state after every background worker cycle and every activation event, pushing engrams to subscribers when relevance scores cross configured thresholds.* [Semantic triggers](docs/semantic-triggers.md)
-
----
-
-**4. Bayesian Confidence**
-
-Every memory has a confidence score. That score is not a label you assign — it updates automatically. A new memory that contradicts an existing one lowers confidence. A new memory that reinforces an existing one raises it. The math is Bayesian: principled, calibrated, updatable, not a heuristic someone tuned by hand. You can ask MuninnDB not just what it remembers, but how sure it is, and the answer is grounded in evidence.
-
-*Technically: Confidence is tracked per-engram using a Beta distribution prior. Evidence for and against is accumulated by the contradiction detection and reinforcement systems. Posterior confidence is computed and stored at update time.* [Cognitive primitives](docs/cognitive-primitives.md)
-
----
-
-**5. Retroactive Enrichment**
-
-Install the embed plugin. Every existing memory in your vault gets vector embeddings automatically, in the background, without blocking reads or writes. The activation engine immediately becomes smarter. Install the enrich plugin and every memory gets LLM-generated summaries, entity extraction, and typed relationship detection — retroactively applied to everything already in the database.
-
-You don't rewrite your application. You don't migrate your data. You add a plugin and the database upgrades its own understanding of what it holds.
-
-*Technically: Both plugins implement the MuninnDB plugin interface, registering as background enrichment workers. They process the engram backlog asynchronously using configurable concurrency and rate limits.* [Plugins](docs/plugins.md)
-
----
-
-## Quickstart
+## Try It — 30 Seconds
 
 ```bash
-# Single binary. Zero config. Zero dependencies.
-go run ./cmd/muninndb -data ./my-memory
+# 1. Install
+curl -sSL https://muninndb.com/install.sh | sh
 
-# Three ports come up:
-# 8474 — MBP (native binary protocol, fastest)
-# 8475 — REST (JSON)
-# 8750 — MCP (for AI agents)
-# 8476 — Web UI
+# 2. Start (first-run setup is automatic)
+muninn start
 ```
 
-**Via REST (available today):**
-
 ```bash
-# Write a memory
-curl -X POST http://localhost:8475/api/engrams \
-  -H "Content-Type: application/json" \
-  -d '{"concept":"architecture decision","content":"We chose event sourcing over CRUD for the order service"}'
+# 3. Store a memory
+curl -sX POST http://localhost:8475/api/engrams \
+  -H 'Content-Type: application/json' \
+  -d '{"concept":"payment incident","content":"We switched to idempotency keys after the double-charge incident in Q3"}'
 
-# Activate by context
-curl -X POST http://localhost:8475/api/activate \
-  -H "Content-Type: application/json" \
-  -d '{"context":"designing the order refund flow"}'
-```
-
-**Via MCP (for AI agents — Claude, Cursor, and any MCP-compatible client):**
-
-MuninnDB exposes 17 MCP tools at `http://localhost:8750`. Point your MCP client at that address and MuninnDB becomes your agent's persistent memory with no additional integration work.
-
-> **Go SDK** is in active development. Watch this repo for updates.
-
----
-
-## Access & Authentication
-
-MuninnDB uses a two-layer model that reflects how a cognitive database is actually used — not how a relational database was designed in 1974.
-
-**Layer 1 — Admin (operators):** Username and password. Used for the web UI and shell. The first run prints a generated root password. Admins create vaults, manage API keys, and configure access.
-
-**Layer 2 — Vault API keys:** Each vault is either **open** (no auth, default) or **locked** (requires a bearer key). A vault can have multiple keys — one per integration point. Keys come in two modes:
-
-| Mode | What it does |
-|---|---|
-| `full` | Participates in cognitive state. Activations update decay timers, access counts, and Hebbian weights. The vault *learns* from this connection. |
-| `observe` | Ephemeral reads only. Relevance scores are computed but nothing is written back. The cognitive state of the vault is never altered. |
-
-This distinction matters because MuninnDB is the first database where **reads have side effects on the data**. When you activate a memory, you strengthen its connections, reset its decay timer, and influence what surfaces next time. An `observe` key gives you a window into the vault's learned state without contaminating it. A dashboard, an analytics job, or a read-only partner integration should never reshape the brain. A `full` key is for agents that are part of the brain.
-
-```bash
-# Create a key (admin only)
-curl -X POST http://localhost:8475/api/admin/keys \
-  -H "Content-Type: application/json" \
-  -d '{"vault":"default","label":"production-agent","mode":"full"}'
-# → {"token":"mk_xK9m...","key":{...}}   ← token shown once
-
-# Use the key on any vault request
-curl -X POST http://localhost:8475/api/activate \
-  -H "Authorization: Bearer mk_xK9m..." \
-  -H "Content-Type: application/json" \
+# 4. Ask what is relevant RIGHT NOW
+curl -sX POST http://localhost:8475/api/activate \
+  -H 'Content-Type: application/json' \
   -d '{"context":"debugging the payment retry logic"}'
 ```
 
-[Full auth documentation →](docs/auth.md)
+That Q3 incident surfaces. You never mentioned it. MuninnDB connected the concepts.
+
+**Web UI:** `http://localhost:8476` · **Admin:** `root` / `password` (change after first login)
+
+---
+
+## Connect Your AI Tools
+
+MuninnDB auto-detects and configures Claude Desktop, Cursor, OpenClaw, Windsurf, VS Code, and others:
+
+```bash
+muninn init
+```
+
+Follow the prompts. Done. Your AI tools now have persistent, cognitive memory.
+
+**Manual MCP configuration** — if you prefer to configure by hand:
+
+<details>
+<summary>Claude Desktop</summary>
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "muninndb": {
+      "url": "http://localhost:8750/mcp"
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary>Cursor</summary>
+
+Add to your Cursor MCP settings (`~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "muninndb": {
+      "url": "http://localhost:8750/mcp"
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary>OpenClaw</summary>
+
+Add to your OpenClaw MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "muninndb": {
+      "url": "http://localhost:8750/mcp"
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary>Windsurf / VS Code</summary>
+
+Add to your MCP settings file:
+
+```json
+{
+  "servers": {
+    "muninndb": {
+      "url": "http://localhost:8750/mcp"
+    }
+  }
+}
+```
+</details>
+
+MuninnDB exposes **17 MCP tools** — store, activate, search, watch, manage vaults, and more. No token required against the default vault. [Full MCP reference →](https://muninndb.com/docs)
+
+---
+
+## What Just Happened
+
+Most databases store data and wait. MuninnDB stores *memory traces* — called **engrams** — and continuously works on them in the background. When you called `activate`, it ran a 6-phase pipeline: parallel full-text + vector search, fused the results, applied Hebbian co-activation boosts from past queries, traversed the association graph, and scored everything by confidence — in under 20ms.
+
+The Q3 incident surfaced because MuninnDB understood that *"payment retry logic"* and *"idempotency keys after a double-charge"* are part of the same conversation. You never wrote that relationship. It emerged from semantic proximity and how these concepts travel together. That is the difference between a database and memory.
+
+[Deep dive: How Memory Works →](docs/how-memory-works.md)
+
+---
+
+## Why MuninnDB
+
+- **Memory decay** — relevance recalculates continuously using the Ebbinghaus forgetting curve. Old memories fade. Frequently recalled memories stay sharp. The database moves while you sleep.
+- **Hebbian learning** — memories activated together automatically form associations. Edges strengthen with co-activation, fade when the pattern stops. You never define a schema of relationships.
+- **Semantic triggers** — subscribe to a context. The database pushes when something becomes relevant — not because you queried, but because *relevance changed*. No polling. No cron. The DB initiates.
+- **Bayesian confidence** — every engram tracks how sure MuninnDB is. Reinforcing memories raise confidence; contradictions lower it. Grounded in evidence, not a label you assign.
+- **Retroactive enrichment** — add the embed or enrich plugin and every existing memory upgrades automatically in the background. No migration. No code change. The database improves what it already holds.
+- **Four protocols** — MBP (binary, <10ms ACK), REST (JSON), gRPC (protobuf), MCP (AI agents). Pick your stack; they all hit the same cognitive engine.
+- **Single binary** — no Redis, no Kafka, no Postgres dependency. One process. One install command. Runs on a MacBook or a 3-node cluster.
+
+---
+
+## Examples
+
+**REST — the full cycle:**
+
+```bash
+# Write
+curl -sX POST http://localhost:8475/api/engrams \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "concept": "auth architecture",
+    "content": "Short-lived JWTs (15min), refresh tokens in HttpOnly cookies, sessions server-side in Redis",
+    "tags": ["auth", "security"]
+  }'
+
+# Activate by context (returns ranked, decayed, associated memories)
+curl -sX POST http://localhost:8475/api/activate \
+  -H 'Content-Type: application/json' \
+  -d '{"context": "reviewing the login flow for the mobile app", "max_results": 5}'
+
+# Search by text
+curl 'http://localhost:8475/api/engrams?q=JWT&vault=default'
+```
+
+**Python SDK:**
+
+```python
+from muninn import MuninnClient
+
+async with MuninnClient("http://localhost:8475") as m:
+    # Store
+    await m.write(vault="default", concept="auth architecture",
+                  content="Short-lived JWTs, refresh in HttpOnly cookies")
+
+    # Activate — context-aware, ranked, cognitively weighted
+    result = await m.activate(vault="default",
+                              context=["reviewing the login flow"],
+                              max_results=5)
+    for item in result.activations:
+        print(f"{item.concept}  score={item.score:.3f}")
+```
+
+```bash
+pip install muninn-python
+```
+
+**LangChain integration:**
+
+```python
+from muninn.langchain import MuninnDBMemory
+from langchain.chains import ConversationChain
+
+memory = MuninnDBMemory(vault="my-agent")
+chain = ConversationChain(llm=your_llm, memory=memory)
+# Every turn is stored. Every response draws on relevant past context.
+```
+
+[More examples →](sdk/python/examples/) · [Full API reference →](https://muninndb.com/docs)
+
+---
+
+## Configuration
+
+MuninnDB works out of the box with no configuration. The bundled local embedder is included — offline, no API key, no setup.
+
+When you're ready to customize:
+
+| What | How |
+|------|-----|
+| Embedder: bundled (default) | `MUNINN_LOCAL_EMBED=1` or set in `muninn init` |
+| Embedder: Ollama | `MUNINN_OLLAMA_URL=ollama://localhost:11434/nomic-embed-text` |
+| Embedder: OpenAI | `MUNINN_OPENAI_KEY=sk-...` |
+| Embedder: Voyage | `MUNINN_VOYAGE_KEY=pa-...` |
+| LLM enrichment | `MUNINN_ENRICH_URL=anthropic://claude-haiku-4-5-20251001` + `MUNINN_ANTHROPIC_KEY=sk-ant-...` |
+| Data directory | `MUNINNDB_DATA=/path/to/data` (default: `~/.muninn/data`) |
+| Memory limit | `MUNINN_MEM_LIMIT_GB=4` |
+
+**Docker:**
+
+```bash
+docker run -d \
+  --name muninndb \
+  -p 8474:8474 -p 8475:8475 -p 8476:8476 -p 8750:8750 \
+  -v muninndb-data:/data \
+  -e MUNINN_LOCAL_EMBED=1 \
+  ghcr.io/scrypster/muninndb:latest
+```
+
+[Full self-hosting guide →](docs/self-hosting.md)
 
 ---
 
 ## Documentation
 
-| Document | What's in it |
+| | |
 |---|---|
-| [How Memory Works](docs/how-memory-works.md) | The neuroscience behind why MuninnDB works the way it does |
-| [MuninnDB vs. Every Other Database](docs/vs-other-databases.md) | Full comparison with relational, document, key-value, graph, and vector databases |
-| [Architecture Deep Dive](docs/architecture.md) | ERF binary format, 6-phase activation engine, wire protocols, cognitive workers |
-| [Cognitive Primitives](docs/cognitive-primitives.md) | Decay, Hebbian learning, Bayesian confidence, contradiction detection |
-| [Semantic Triggers](docs/semantic-triggers.md) | How push-memory works and why nothing else has it |
-| [What Is An Engram?](docs/engram.md) | The core data model — why it's not a row, not a document, not a node |
-| [Plugins: Embed & Enrich](docs/plugins.md) | Vector embeddings and LLM enrichment, added without changing a line of your code |
-| [Access & Authentication](docs/auth.md) | Two-layer auth model, vault API keys, full vs. observe mode |
+| [Quickstart](docs/quickstart.md) | Detailed install, Docker, embedder setup, first vault |
+| [How Memory Works](docs/how-memory-works.md) | The neuroscience behind why this works |
+| [Architecture](docs/architecture.md) | ERF format, 6-phase engine, wire protocols, cognitive workers |
+| [Cognitive Primitives](docs/cognitive-primitives.md) | Decay math, Hebbian learning, Bayesian confidence |
+| [Semantic Triggers](docs/semantic-triggers.md) | Push-based memory — how and why |
+| [Auth & Vaults](docs/auth.md) | Two-layer model, API keys, full vs. observe mode |
+| [Plugins](docs/plugins.md) | Embed + enrich — retroactive enrichment without code changes |
+| [vs. Other Databases](docs/vs-other-databases.md) | Full comparison with vector, graph, relational, document |
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Pull requests are welcome. If you are thinking about a large change, open an issue first.
+See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome. For large changes, open an issue first.
+
+Ports at a glance: `8474` MBP · `8475` REST · `8476` Web UI · `8477` gRPC · `8750` MCP
 
 ---
 
-## License
+*Named after Muninn — one of Odin's two ravens, whose name means "memory" in Old Norse. Muninn flies across the nine worlds and returns what has been forgotten.*
 
-Apache 2.0. See [LICENSE](LICENSE).
-
----
-
-*Named after Muninn — one of Odin's two ravens, whose name means "memory" in Old Norse. In myth, Muninn flies across the nine worlds and returns what has been forgotten. We thought that was a good name for a database.*
+Built by [MJ Bonanno](https://scrypster.com) · [muninndb.com](https://muninndb.com) · Apache 2.0
