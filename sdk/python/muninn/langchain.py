@@ -31,14 +31,24 @@ except ImportError:
     try:
         from langchain.memory import BaseMemory  # type: ignore[no-redef]
     except ImportError:
-        # LangChain is not installed. Use a Pydantic BaseModel stub so that
-        # MuninnDBMemory can be imported and used standalone (e.g. for
-        # activation-only workflows). Full LangChain chain integration requires:
-        #   pip install muninn-python[langchain]
         try:
             from pydantic import BaseModel as BaseMemory  # type: ignore[no-redef,assignment]
         except ImportError:
-            BaseMemory = object  # type: ignore[assignment,misc]
+            # Neither LangChain nor Pydantic is installed. Provide a minimal
+            # stub so MuninnDBMemory can be imported and used standalone
+            # (activation-only workflows, SDK demos).
+            # Full LangChain chain integration requires:
+            #   pip install muninn-python[langchain]
+            class BaseMemory:  # type: ignore[no-redef]
+                """Minimal stub: accepts field kwargs and sets them as attributes."""
+                def __init__(self, **kwargs: object) -> None:
+                    # Apply class-level defaults, then override with kwargs.
+                    for cls in reversed(type(self).__mro__):
+                        for name, default in vars(cls).items():
+                            if not name.startswith("_") and not callable(default):
+                                object.__setattr__(self, name, default)
+                    for key, value in kwargs.items():
+                        object.__setattr__(self, key, value)
 
 from .client import MuninnClient
 from .types import ActivationItem
