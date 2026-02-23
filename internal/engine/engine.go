@@ -228,8 +228,11 @@ func (e *Engine) Stop() {
 			e.autoAssoc.Stop()
 		}
 		// Stop async novelty worker.
-		if e.noveltyJobs != nil {
-			close(e.noveltyJobs)
+		// Do NOT close noveltyJobs — Write() guards with stopCtx.Done() but
+		// closing a channel concurrently with a pending select-send is still
+		// a data race detected by -race. Signal shutdown via the cancelled
+		// context instead and wait for the worker to drain and exit.
+		if e.noveltyDone != nil {
 			<-e.noveltyDone
 		}
 		// Drain the FTS worker — flushes any queued indexing jobs before exit.
@@ -1561,25 +1564,33 @@ func (e *Engine) RecordAccess(ctx context.Context, vault, id string) error {
 // scans and REFINES association writes entirely off the synchronous write hot path.
 func (e *Engine) runNoveltyWorker() {
 	defer close(e.noveltyDone)
-	for job := range e.noveltyJobs {
-		m := e.noveltyDet.Check(job.vaultID, job.id.String(), job.concept, job.content)
-		if m == nil {
-			continue
-		}
-		targetID, err := storage.ParseULID(m.ExistingULID)
-		if err != nil {
-			continue
-		}
-		refinesAssoc := &storage.Association{
-			TargetID:   targetID,
-			RelType:    storage.RelRefines,
-			Weight:     float32(m.Similarity),
-			Confidence: 1.0,
-			CreatedAt:  time.Now(),
-		}
-		_ = e.store.WriteAssociation(e.stopCtx, job.wsPrefix, job.id, targetID, refinesAssoc)
-		if e.coherence != nil {
-			e.coherence.GetOrCreate(job.vaultName).RecordLinkCreated(true, true)
+	for {
+		select {
+		case <-e.stopCtx.Done():
+			return
+		case job, ok := <-e.noveltyJobs:
+			if !ok {
+				return
+			}
+			m := e.noveltyDet.Check(job.vaultID, job.id.String(), job.concept, job.content)
+			if m == nil {
+				continue
+			}
+			targetID, err := storage.ParseULID(m.ExistingULID)
+			if err != nil {
+				continue
+			}
+			refinesAssoc := &storage.Association{
+				TargetID:   targetID,
+				RelType:    storage.RelRefines,
+				Weight:     float32(m.Similarity),
+				Confidence: 1.0,
+				CreatedAt:  time.Now(),
+			}
+			_ = e.store.WriteAssociation(e.stopCtx, job.wsPrefix, job.id, targetID, refinesAssoc)
+			if e.coherence != nil {
+				e.coherence.GetOrCreate(job.vaultName).RecordLinkCreated(true, true)
+			}
 		}
 	}
 }
