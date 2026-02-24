@@ -31,3 +31,4 @@ muninndb-data/
 # Bible eval testdata (downloaded via scripts/eval-bible-setup.sh)
 testdata/bible/kjv.json
 testdata/bible/cross-refs.tsv
+testdata/bible/cross-refs.csv

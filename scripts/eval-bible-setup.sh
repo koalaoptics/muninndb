@@ -6,7 +6,7 @@ DATA_DIR="$SCRIPT_DIR/../testdata/bible"
 
 mkdir -p "$DATA_DIR"
 
-KJV_URL="https://raw.githubusercontent.com/scrollmapper/bible_databases/master/json/t_kjv.json"
+KJV_URL="https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/KJV.json"
 KJV_FILE="$DATA_DIR/kjv.json"
 if [ ! -f "$KJV_FILE" ]; then
     echo "Downloading KJV Bible JSON..."
@@ -16,8 +16,8 @@ else
     echo "KJV Bible JSON already present: $KJV_FILE"
 fi
 
-XREF_URL="https://a.openbible.info/refs/cross-references.tsv"
-XREF_FILE="$DATA_DIR/cross-refs.tsv"
+XREF_URL="https://raw.githubusercontent.com/theonize/bible_database/master/xref/cross_references.csv"
+XREF_FILE="$DATA_DIR/cross-refs.csv"
 if [ ! -f "$XREF_FILE" ]; then
     echo "Downloading OpenBible cross-references..."
     curl -fsSL "$XREF_URL" -o "$XREF_FILE"
@@ -28,4 +28,4 @@ fi
 
 echo ""
 echo "Setup complete."
-ls -lh "$DATA_DIR"/*.json "$DATA_DIR"/*.tsv 2>/dev/null || true
+ls -lh "$DATA_DIR"/*.json "$DATA_DIR"/*.tsv "$DATA_DIR"/*.csv 2>/dev/null || true

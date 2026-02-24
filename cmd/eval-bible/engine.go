@@ -18,12 +18,13 @@ import (
 
 // evalEngine bundles all the engine components needed for Bible eval.
 type evalEngine struct {
-	eng      *engine.Engine
-	store    *storage.PebbleStore
-	hnswReg  *hnswpkg.Registry
-	embedder activation.Embedder
-	ws       [8]byte
-	cancel   context.CancelFunc
+	eng           *engine.Engine
+	store         *storage.PebbleStore
+	hnswReg       *hnswpkg.Registry
+	embedder      activation.Embedder
+	ws            [8]byte
+	cancel        context.CancelFunc
+	hebbianWorker *cognitive.HebbianWorker
 }
 
 // newEvalEngine initialises the full MuninnDB engine stack for evaluation.
@@ -84,18 +85,23 @@ func newEvalEngine(ctx context.Context, dataDir string) (*evalEngine, error) {
 	ws := store.ResolveVaultPrefix("bible")
 
 	return &evalEngine{
-		eng:      eng,
-		store:    store,
-		hnswReg:  hnswReg,
-		embedder: embedder,
-		ws:       ws,
-		cancel:   workerCancel,
+		eng:           eng,
+		store:         store,
+		hnswReg:       hnswReg,
+		embedder:      embedder,
+		ws:            ws,
+		cancel:        workerCancel,
+		hebbianWorker: hebbianWorker,
 	}, nil
 }
 
 // close stops all background workers and releases storage.
+// Order mirrors cmd/eval/main.go: cancel context → stop Hebbian → stop engine → close store.
 func (ee *evalEngine) close() {
 	ee.cancel()
+	if ee.hebbianWorker != nil {
+		ee.hebbianWorker.Stop()
+	}
 	ee.eng.Stop()
 	ee.store.Close()
 }

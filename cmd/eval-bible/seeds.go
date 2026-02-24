@@ -99,15 +99,34 @@ func parseXRefRef(ref string) (string, error) {
 	return fmt.Sprintf("%s %s:%s", bookName, parts[1], parts[2]), nil
 }
 
-// parseXRef parses OpenBible TSV cross-reference data into an xrefMap.
-// TSV format: "From Verse\tTo Verse\tVotes" with a header line.
+// parseXRef parses cross-reference data into an xrefMap.
+// Supports TSV format ("From Verse\tTo Verse\tVotes" with header line) and
+// CSV format ("Gen.1.1,Isa.65.17,6" without header line). Auto-detected.
 func parseXRef(data []byte) (xrefMap, error) {
 	result := make(xrefMap)
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 
-	// Skip header line
+	// Detect separator: read first line to determine format
 	if !scanner.Scan() {
 		return result, nil
+	}
+	firstLine := scanner.Text()
+
+	sep := ","
+	hasHeader := false
+	if strings.Contains(firstLine, "\t") {
+		sep = "\t"
+		hasHeader = true // TSV format has a header row
+	}
+	// If CSV format (no header), process the first line as data
+	if !hasHeader && firstLine != "" {
+		if fields := strings.SplitN(firstLine, sep, 3); len(fields) >= 2 {
+			if from, err := parseXRefRef(fields[0]); err == nil {
+				if to, err := parseXRefRef(fields[1]); err == nil {
+					result[from] = append(result[from], to)
+				}
+			}
+		}
 	}
 
 	for scanner.Scan() {
@@ -115,7 +134,7 @@ func parseXRef(data []byte) (xrefMap, error) {
 		if line == "" {
 			continue
 		}
-		fields := strings.Split(line, "\t")
+		fields := strings.SplitN(line, sep, 3)
 		if len(fields) < 2 {
 			continue
 		}

@@ -7,12 +7,35 @@ import (
 	"github.com/scrypster/muninndb/internal/transport/mbp"
 )
 
-// kjvRecord is one verse from the scrollmapper KJV JSON format.
+// kjvRecord is one verse from the scrollmapper legacy flat KJV JSON format.
+// Format: [{"b":1,"c":1,"v":1,"t":"In the beginning..."},...]
 type kjvRecord struct {
 	B int    `json:"b"` // book number 1-66
 	C int    `json:"c"` // chapter
 	V int    `json:"v"` // verse
 	T string `json:"t"` // text
+}
+
+// kjvNested represents the scrollmapper current nested KJV JSON format.
+// Format: {"translation":"KJV","books":[{"name":"Genesis","chapters":[{"chapter":1,"verses":[{"verse":1,"text":"..."}]}]}]}
+type kjvNested struct {
+	Translation string    `json:"translation"`
+	Books       []kjvBook `json:"books"`
+}
+
+type kjvBook struct {
+	Name     string       `json:"name"`
+	Chapters []kjvChapter `json:"chapters"`
+}
+
+type kjvChapter struct {
+	Chapter int        `json:"chapter"`
+	Verses  []kjvVerse `json:"verses"`
+}
+
+type kjvVerse struct {
+	Verse int    `json:"verse"`
+	Text  string `json:"text"`
 }
 
 // bookNames maps book number (1-66) to canonical name. Index 0 is unused.
@@ -157,6 +180,16 @@ var genreTags = [67]string{
 	66: "prophecy",
 }
 
+// bookNameToNum maps canonical book names back to book numbers (1-66).
+var bookNameToNum map[string]int
+
+func init() {
+	bookNameToNum = make(map[string]int, 66)
+	for i := 1; i <= 66; i++ {
+		bookNameToNum[bookNames[i]] = i
+	}
+}
+
 // verseRef converts a book number, chapter, and verse to a canonical reference string.
 func verseRef(bookNum, chapter, verse int) string {
 	if bookNum < 1 || bookNum > 66 {
@@ -166,39 +199,83 @@ func verseRef(bookNum, chapter, verse int) string {
 }
 
 // parseKJV parses KJV JSON data into WriteRequest slice.
+// Auto-detects format: flat array [{b,c,v,t}] or nested {books:[{name,chapters}]}.
 // If ntOnly is true, only New Testament verses (books 40-66) are included.
 func parseKJV(data []byte, ntOnly bool) ([]mbp.WriteRequest, error) {
+	// Detect format by first non-whitespace byte
+	trimmed := data
+	for len(trimmed) > 0 && (trimmed[0] == ' ' || trimmed[0] == '\t' || trimmed[0] == '\n' || trimmed[0] == '\r') {
+		trimmed = trimmed[1:]
+	}
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		return parseKJVFlat(data, ntOnly)
+	}
+	return parseKJVNested(data, ntOnly)
+}
+
+// parseKJVFlat handles the legacy flat array format: [{b,c,v,t},...].
+func parseKJVFlat(data []byte, ntOnly bool) ([]mbp.WriteRequest, error) {
 	var records []kjvRecord
 	if err := json.Unmarshal(data, &records); err != nil {
-		return nil, fmt.Errorf("parse KJV JSON: %w", err)
+		return nil, fmt.Errorf("parse KJV flat JSON: %w", err)
 	}
-
-	reqs := make([]mbp.WriteRequest, 0, len(records))
-	for _, r := range records {
-		if r.B < 1 || r.B > 66 {
-			continue
+	return buildWriteRequests(func(emit func(bookNum, chapter, verse int, text string)) {
+		for _, r := range records {
+			emit(r.B, r.C, r.V, r.T)
 		}
-		isNT := r.B >= 40
+	}, ntOnly), nil
+}
+
+// parseKJVNested handles the current scrollmapper nested format: {books:[...]}.
+func parseKJVNested(data []byte, ntOnly bool) ([]mbp.WriteRequest, error) {
+	var nested kjvNested
+	if err := json.Unmarshal(data, &nested); err != nil {
+		return nil, fmt.Errorf("parse KJV nested JSON: %w", err)
+	}
+	return buildWriteRequests(func(emit func(bookNum, chapter, verse int, text string)) {
+		for _, book := range nested.Books {
+			bookNum, ok := bookNameToNum[book.Name]
+			if !ok {
+				continue
+			}
+			for _, ch := range book.Chapters {
+				for _, v := range ch.Verses {
+					emit(bookNum, ch.Chapter, v.Verse, v.Text)
+				}
+			}
+		}
+	}, ntOnly), nil
+}
+
+// buildWriteRequests uses an iterator pattern to build the WriteRequest slice
+// from any KJV source, applying testament and genre tagging.
+func buildWriteRequests(iter func(emit func(bookNum, chapter, verse int, text string)), ntOnly bool) []mbp.WriteRequest {
+	reqs := make([]mbp.WriteRequest, 0, 31102) // full Bible verse count
+	iter(func(bookNum, chapter, verse int, text string) {
+		if bookNum < 1 || bookNum > 66 {
+			return
+		}
+		isNT := bookNum >= 40
 		if ntOnly && !isNT {
-			continue
+			return
 		}
 
-		tags := []string{}
+		tags := make([]string, 0, 3)
 		if isNT {
 			tags = append(tags, "New Testament")
 		} else {
 			tags = append(tags, "Old Testament")
 		}
-		tags = append(tags, bookNames[r.B])
-		if g := genreTags[r.B]; g != "" {
+		tags = append(tags, bookNames[bookNum])
+		if g := genreTags[bookNum]; g != "" {
 			tags = append(tags, g)
 		}
 
 		reqs = append(reqs, mbp.WriteRequest{
-			Concept: verseRef(r.B, r.C, r.V),
-			Content: r.T,
+			Concept: verseRef(bookNum, chapter, verse),
+			Content: text,
 			Tags:    tags,
 		})
-	}
-	return reqs, nil
+	})
+	return reqs
 }
