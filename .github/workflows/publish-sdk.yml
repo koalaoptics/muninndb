@@ -1,9 +1,12 @@
 name: Publish Python SDK to PyPI
 
-# Triggers on a GitHub Release (tag v*) OR manually from the Actions tab.
+# Triggers on version tag push OR manually from the Actions tab.
+# NOTE: We use push→tags instead of release→published because GitHub's
+# GITHUB_TOKEN events do not trigger downstream workflows.
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -52,7 +55,7 @@ jobs:
           ls -lh dist-all/
 
       - name: Publish to PyPI
-        if: github.event_name == 'release' || github.event.inputs.dry_run == 'false'
+        if: github.event.inputs.dry_run != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist-all/
