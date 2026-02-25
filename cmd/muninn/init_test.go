@@ -191,7 +191,11 @@ func TestPrintEmbedderNote(t *testing.T) {
 		{"2", "Ollama"},
 		{"3", "OpenAI"},
 		{"4", "Voyage"},
-		{"5", ""},         // unknown — no output (falls to default)
+		{"5", "Cohere"},
+		{"6", "Google"},
+		{"7", "Jina"},
+		{"8", "Mistral"},
+		{"9", ""},         // unknown — no output (falls to default)
 		{"", ""},          // empty — falls to default
 	}
 	for _, tc := range cases {
