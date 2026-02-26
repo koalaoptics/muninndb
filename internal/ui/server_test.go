@@ -114,6 +114,40 @@ func (m *mockEngine) Checkpoint(destDir string) error {
 	return nil
 }
 
+func (m *mockEngine) Evolve(ctx context.Context, vault, engramID, newContent, reason string) (*rest.EvolveResponse, error) {
+	return &rest.EvolveResponse{ID: "evolved-id"}, nil
+}
+func (m *mockEngine) Consolidate(ctx context.Context, vault string, ids []string, mergedContent string) (*rest.ConsolidateResponse, error) {
+	return &rest.ConsolidateResponse{ID: "consolidated-id", Archived: ids}, nil
+}
+func (m *mockEngine) Decide(ctx context.Context, vault, decision, rationale string, alternatives, evidenceIDs []string) (*rest.DecideResponse, error) {
+	return &rest.DecideResponse{ID: "decision-id"}, nil
+}
+func (m *mockEngine) Restore(ctx context.Context, vault, engramID string) (*rest.RestoreResponse, error) {
+	return &rest.RestoreResponse{ID: engramID, Concept: "restored", Restored: true, State: "active"}, nil
+}
+func (m *mockEngine) Traverse(ctx context.Context, vault string, req *rest.TraverseRequest) (*rest.TraverseResponse, error) {
+	return &rest.TraverseResponse{}, nil
+}
+func (m *mockEngine) Explain(ctx context.Context, vault string, req *rest.ExplainRequest) (*rest.ExplainResponse, error) {
+	return &rest.ExplainResponse{}, nil
+}
+func (m *mockEngine) UpdateState(ctx context.Context, vault, engramID, state, reason string) error {
+	return nil
+}
+func (m *mockEngine) ListDeleted(ctx context.Context, vault string, limit int) (*rest.ListDeletedResponse, error) {
+	return &rest.ListDeletedResponse{}, nil
+}
+func (m *mockEngine) RetryEnrich(ctx context.Context, vault, engramID string) (*rest.RetryEnrichResponse, error) {
+	return &rest.RetryEnrichResponse{}, nil
+}
+func (m *mockEngine) GetContradictions(ctx context.Context, vault string) (*rest.ContradictionsResponse, error) {
+	return &rest.ContradictionsResponse{}, nil
+}
+func (m *mockEngine) GetGuide(ctx context.Context, vault string) (string, error) {
+	return "", nil
+}
+
 func makeMockFS() fs.FS {
 	return fstest.MapFS{
 		"static/dist/app.css":   &fstest.MapFile{Data: []byte("/* css */")},

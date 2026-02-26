@@ -65,7 +65,7 @@ func TestTemporalFilter_CreatedAfter(t *testing.T) {
 		Vault:      "temporal-test",
 		Context:    []string{"memory engram"},
 		MaxResults: 100,
-		Threshold:  0.0,
+		Threshold:  0.001,
 		Filters: []mbp.Filter{
 			{
 				Field: "created_after",
@@ -153,7 +153,7 @@ func TestTemporalFilter_CreatedBefore(t *testing.T) {
 		Vault:      "temporal-before-test",
 		Context:    []string{"memory engram"},
 		MaxResults: 100,
-		Threshold:  0.0,
+		Threshold:  0.001,
 		Filters: []mbp.Filter{
 			{
 				Field: "created_before",
@@ -238,7 +238,7 @@ func TestTemporalFilter_CombinedRange(t *testing.T) {
 		Vault:      "temporal-range-test",
 		Context:    []string{"memory engram"},
 		MaxResults: 100,
-		Threshold:  0.0,
+		Threshold:  0.001,
 		Filters: []mbp.Filter{
 			{
 				Field: "created_after",
@@ -361,7 +361,7 @@ func TestCustomCreatedAt_FilterUsesCustomTimestamp(t *testing.T) {
 		Vault:      "backdated-test",
 		Context:    []string{"engram creation timestamp"},
 		MaxResults: 100,
-		Threshold:  0.0,
+		Threshold:  0.001,
 		Filters: []mbp.Filter{
 			{
 				Field: "created_before",
