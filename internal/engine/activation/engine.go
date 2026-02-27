@@ -52,6 +52,7 @@ type Weights struct {
 	UseACTR      bool
 	ACTRDecay    float32 // power-law decay exponent d (0 → default 0.5)
 	ACTRHebScale float32 // Hebbian scaling inside softplus (0 → default 4.0)
+	DisableACTR  bool    // when true, force legacy weighted-sum scoring (overrides UseACTR)
 }
 
 type resolvedWeights struct {
@@ -312,11 +313,16 @@ func (e *ActivationEngine) Close() {
 }
 
 // CalcCandidatesPerIndex returns the per-index candidate pool size for phase2
-// based on vault size. Formula: clamp(sqrt(vaultSize), 30, 200).
+// based on vault size. For small vaults (≤1000 items) returns N to scan
+// everything — 1000 × 384 cosine comparisons is negligible.
+// For larger vaults: clamp(sqrt(vaultSize), 30, 200).
 // Called by engine.go before constructing ActivateRequest.
 func CalcCandidatesPerIndex(vaultSize int64) int {
 	if vaultSize <= 0 {
 		return 30
+	}
+	if vaultSize <= 1000 {
+		return int(vaultSize)
 	}
 	c := int(math.Sqrt(float64(vaultSize)))
 	if c < 30 {
@@ -1184,6 +1190,21 @@ func (e *ActivationEngine) phase6Score(
 		goto cgdnDone
 	}
 
+	// Legacy weighted-sum path: used when neither CGDN nor ACT-R is active (DisableACTR=true).
+	for _, c := range all {
+		eng := engramByID[c.id]
+		if eng == nil || !passesMetaFilter(eng, req.Filters) {
+			continue
+		}
+		components := computeComponents(c.vectorScore, c.ftsScore, c.hebbianBoost, eng, lastAccessNsByID[c.id], now, w)
+		final := components.Final
+		if final < req.Threshold {
+			continue
+		}
+		scored = append(scored, scoredItem{id: c.id, final: final, components: components, hopPath: c.hopPath})
+	}
+	sort.Slice(scored, func(i, j int) bool { return scored[i].final > scored[j].final })
+
 cgdnDone:
 	totalFound := len(scored)
 	if len(scored) > req.MaxResults {
@@ -1474,7 +1495,7 @@ func resolveWeights(req *Weights, def DefaultWeights) resolvedWeights {
 			HebbianBoost:       float64(def.HebbianBoost),
 			AccessFrequency:    float64(def.AccessFrequency),
 			Recency:            float64(def.Recency),
-			UseACTR:            true,
+			UseACTR:            true, // default path always uses ACT-R
 			ACTRDecay:          0.5,
 			ACTRHebScale:       4.0,
 		}
@@ -1487,7 +1508,7 @@ func resolveWeights(req *Weights, def DefaultWeights) resolvedWeights {
 		AccessFrequency:    float64(req.AccessFrequency),
 		Recency:            float64(req.Recency),
 		UseCGDN:            req.UseCGDN,
-		UseACTR:            true, // only path for now; decay worker code kept for possible future use
+		UseACTR:            !req.DisableACTR,
 	}
 	// Apply CGDN defaults when enabled.
 	if req.UseCGDN {
@@ -1504,7 +1525,7 @@ func resolveWeights(req *Weights, def DefaultWeights) resolvedWeights {
 			rw.CGDNPower = float64(req.CGDNPower)
 		}
 	}
-	// ACT-R params (always used; decay path unreachable).
+	// ACT-R params (defaults applied; only used when UseACTR=true).
 	rw.ACTRDecay = 0.5
 	if req.ACTRDecay > 0 {
 		rw.ACTRDecay = float64(req.ACTRDecay)

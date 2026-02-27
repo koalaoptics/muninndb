@@ -5,6 +5,7 @@
 /bench
 /bench-test
 /eval
+/eval-semantic
 /diag
 /muninndb-test
 

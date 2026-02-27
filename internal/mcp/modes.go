@@ -1,8 +1,8 @@
 package mcp
 
-import "fmt"
+import "github.com/scrypster/muninndb/internal/auth"
 
-// RecallMode is a preset bundle of recall parameters for common retrieval patterns.
+// RecallMode is the MCP-internal adapter for recall mode presets.
 // Fields with zero values are not applied (caller defaults remain).
 type RecallMode struct {
 	MaxHops   int
@@ -11,35 +11,21 @@ type RecallMode struct {
 	SemanticSimilarity float32
 	FullTextRelevance  float32
 	Recency            float32
+	DisableACTR        bool
 }
 
-// recallModes are the built-in presets for muninn_recall.
-var recallModes = map[string]RecallMode{
-	"semantic": {
-		SemanticSimilarity: 0.8,
-		FullTextRelevance:  0.2,
-		MaxHops:            0,
-		Threshold:          0.3,
-	},
-	"recent": {
-		Recency:            0.7,
-		SemanticSimilarity: 0.3,
-		MaxHops:            1,
-		Threshold:          0.2,
-	},
-	"balanced": {}, // zero value = engine defaults
-	"deep": {
-		MaxHops:   4,
-		Threshold: 0.1,
-	},
-}
-
-// lookupMode returns the RecallMode for the given name.
-// Returns an error for unknown mode names — no silent degradation.
+// lookupMode returns the RecallMode for the given name by delegating to auth.LookupRecallMode.
 func lookupMode(name string) (RecallMode, error) {
-	m, ok := recallModes[name]
-	if !ok {
-		return RecallMode{}, fmt.Errorf("unknown recall mode %q: valid modes are semantic, recent, balanced, deep", name)
+	p, err := auth.LookupRecallMode(name)
+	if err != nil {
+		return RecallMode{}, err
 	}
-	return m, nil
+	return RecallMode{
+		MaxHops:            p.MaxHops,
+		Threshold:          p.Threshold,
+		SemanticSimilarity: p.SemanticSimilarity,
+		FullTextRelevance:  p.FullTextRelevance,
+		Recency:            p.Recency,
+		DisableACTR:        p.DisableACTR,
+	}, nil
 }

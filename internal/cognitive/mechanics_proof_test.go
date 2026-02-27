@@ -524,16 +524,21 @@ func TestLiveIntegration_WriteAndActivate(t *testing.T) {
 		t.Fatalf("expected 5 engrams written, got %d", len(ids))
 	}
 
+	// Brief pause to let the async embedder index the engrams.
+	time.Sleep(500 * time.Millisecond)
+
 	// Activate on "Go programming" — should return Go-related results first
 	type activateReq struct {
 		Context    []string `json:"context"`
 		Vault      string   `json:"vault"`
 		MaxResults int      `json:"max_results"`
+		Threshold  float64  `json:"threshold"`
 	}
 	body, _ := json.Marshal(activateReq{
 		Context:    []string{"Go programming language"},
 		Vault:      vault,
 		MaxResults: 5,
+		Threshold:  0.01, // low threshold to ensure FTS-only results are included
 	})
 	resp2, err := http.Post(base+"/api/activate", "application/json", bytes.NewReader(body))
 	if err != nil {

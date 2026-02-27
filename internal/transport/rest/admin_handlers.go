@@ -237,6 +237,13 @@ func (s *Server) handlePutVaultPlasticity(as *auth.Store) http.HandlerFunc {
 				return
 			}
 		}
+		if cfg.RecallMode != nil && *cfg.RecallMode != "" {
+			if !auth.ValidRecallMode(*cfg.RecallMode) {
+				s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram,
+					fmt.Sprintf("invalid recall_mode %q: valid values are semantic, recent, balanced, deep", *cfg.RecallMode))
+				return
+			}
+		}
 		preset := cfg.Preset
 		if preset == "" {
 			preset = "default"

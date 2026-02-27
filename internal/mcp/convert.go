@@ -17,12 +17,13 @@ func activationToMemory(item *mbp.ActivationItem) Memory {
 		content = content[:contentMaxLen] + "..."
 	}
 	return Memory{
-		ID:         item.ID,
-		Concept:    item.Concept,
-		Content:    content,
-		Score:      float64(item.Score),
-		Confidence: item.Confidence,
-		Why:        item.Why,
+		ID:          item.ID,
+		Concept:     item.Concept,
+		Content:     content,
+		Score:       float64(item.Score),
+		VectorScore: float64(item.ScoreComponents.SemanticSimilarity),
+		Confidence:  item.Confidence,
+		Why:         item.Why,
 	}
 }
 

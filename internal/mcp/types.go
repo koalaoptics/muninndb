@@ -54,16 +54,17 @@ type WriteResult struct {
 }
 
 type Memory struct {
-	ID         string    `json:"id"`
-	Concept    string    `json:"concept"`
-	Content    string    `json:"content"` // truncated to 500 chars if no Summary
-	Summary    string    `json:"summary,omitempty"`
-	Score      float64   `json:"score,omitempty"`
-	Confidence float32   `json:"confidence"`
-	Why        string    `json:"why,omitempty"`
-	Tags       []string  `json:"tags,omitempty"`
-	State      string    `json:"state"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	Concept     string    `json:"concept"`
+	Content     string    `json:"content"` // truncated to 500 chars if no Summary
+	Summary     string    `json:"summary,omitempty"`
+	Score       float64   `json:"score,omitempty"`
+	VectorScore float64   `json:"vector_score,omitempty"`
+	Confidence  float32   `json:"confidence"`
+	Why         string    `json:"why,omitempty"`
+	Tags        []string  `json:"tags,omitempty"`
+	State       string    `json:"state"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type ContradictionPair struct {

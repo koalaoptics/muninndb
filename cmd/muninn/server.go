@@ -122,7 +122,7 @@ func resolveEmbedInfo(cfg plugincfg.PluginConfig) rest.EmbedInfo {
 	}
 	// Bundled local embedder: on by default. Opt out with MUNINN_LOCAL_EMBED=0.
 	if os.Getenv("MUNINN_LOCAL_EMBED") != "0" && embedpkg.LocalAvailable() {
-		return rest.EmbedInfo{Provider: "local", Model: "all-MiniLM-L6-v2"}
+		return rest.EmbedInfo{Provider: "local", Model: "bge-small-en-v1.5"}
 	}
 	return rest.EmbedInfo{Provider: "none", Model: ""}
 }

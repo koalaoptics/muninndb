@@ -67,6 +67,64 @@ func TestL2NormalizeZero(t *testing.T) {
 	}
 }
 
+// --- clsPool tests (bge-small-en-v1.5 CLS-token extraction) ---
+
+func TestClsPool(t *testing.T) {
+	// 4 tokens, dim=3. CLS token is at position 0.
+	hidden := []float32{
+		1, 2, 3, // token 0: CLS — must be extracted
+		9, 9, 9, // token 1: unused
+		8, 8, 8, // token 2: unused
+		7, 7, 7, // token 3: unused
+	}
+	got := clsPool(hidden, 3)
+
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, want 3", len(got))
+	}
+	if got[0] != 1 || got[1] != 2 || got[2] != 3 {
+		t.Errorf("cls token: got %v, want [1 2 3]", got)
+	}
+	// Verify independence: modifying got must not affect hidden.
+	got[0] = 99
+	if hidden[0] == 99 {
+		t.Error("clsPool returned a slice sharing the hidden buffer (must copy)")
+	}
+}
+
+func TestClsPool_MinimalSequence(t *testing.T) {
+	hidden := []float32{0.5, -0.5, 1.0}
+	got := clsPool(hidden, 3)
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	for i, want := range []float32{0.5, -0.5, 1.0} {
+		if abs32(got[i]-want) > 1e-6 {
+			t.Errorf("dim %d: got %v, want %v", i, got[i], want)
+		}
+	}
+}
+
+func TestClsPool_AfterL2Normalize(t *testing.T) {
+	hidden := []float32{
+		3, 0, 4, // CLS: norm = 5 → normalized [0.6, 0, 0.8]
+		1, 1, 1, // irrelevant padding token
+	}
+	vec := clsPool(hidden, 3)
+	l2Normalize(vec)
+
+	norm := computeNorm(vec)
+	if math.Abs(norm-1.0) > 1e-5 {
+		t.Errorf("expected unit norm after CLS-pool + L2-normalize, got %.8f", norm)
+	}
+	if abs32(vec[0]-0.6) > 1e-5 {
+		t.Errorf("dim 0: got %v, want 0.6", vec[0])
+	}
+	if abs32(vec[2]-0.8) > 1e-5 {
+		t.Errorf("dim 2: got %v, want 0.8", vec[2])
+	}
+}
+
 func TestLocalProvider_Name(t *testing.T) {
 	p := &LocalProvider{}
 	if p.Name() != "local" {

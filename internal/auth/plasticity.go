@@ -46,6 +46,10 @@ type PlasticityConfig struct {
 	// EnrichmentEnabled is a vault-level kill switch for all enrichment (both inline and background).
 	// Default: true. When false, skip ALL enrichment for engrams in this vault.
 	EnrichmentEnabled *bool `json:"enrichment_enabled,omitempty"`
+
+	// RecallMode is the default recall mode for this vault: "semantic"|"recent"|"balanced"|"deep".
+	// nil = use "balanced" (engine defaults).
+	RecallMode *string `json:"recall_mode,omitempty"`
 }
 
 // ResolvedPlasticity is the fully-merged configuration after applying preset defaults
@@ -87,6 +91,8 @@ type ResolvedPlasticity struct {
 	InlineEnrichment string `json:"inline_enrichment"` // "caller_only", "caller_preferred", "background_only", "disabled"
 	// EnrichmentEnabled is a vault-level kill switch for all enrichment.
 	EnrichmentEnabled bool `json:"enrichment_enabled"`
+	// RecallMode is the default recall mode for this vault.
+	RecallMode string `json:"recall_mode"`
 }
 
 type plasticityPreset struct {
@@ -113,6 +119,7 @@ type plasticityPreset struct {
 	BehaviorMode         string
 	InlineEnrichment  string
 	EnrichmentEnabled bool
+	RecallMode        string
 }
 
 var plasticityPresets = map[string]plasticityPreset{
@@ -139,6 +146,7 @@ var plasticityPresets = map[string]plasticityPreset{
 		BehaviorMode:         "autonomous",
 		InlineEnrichment:     "caller_preferred",
 		EnrichmentEnabled:    true,
+		RecallMode:           "balanced",
 	},
 	"reference": {
 		HebbianEnabled:       true,
@@ -163,6 +171,7 @@ var plasticityPresets = map[string]plasticityPreset{
 		BehaviorMode:         "autonomous",
 		InlineEnrichment:     "caller_preferred",
 		EnrichmentEnabled:    true,
+		RecallMode:           "balanced",
 	},
 	"scratchpad": {
 		HebbianEnabled:       false,
@@ -187,6 +196,7 @@ var plasticityPresets = map[string]plasticityPreset{
 		BehaviorMode:         "selective",
 		InlineEnrichment:     "caller_preferred",
 		EnrichmentEnabled:    true,
+		RecallMode:           "balanced",
 	},
 	"knowledge-graph": {
 		HebbianEnabled:       true,
@@ -211,6 +221,7 @@ var plasticityPresets = map[string]plasticityPreset{
 		BehaviorMode:         "autonomous",
 		InlineEnrichment:     "caller_preferred",
 		EnrichmentEnabled:    true,
+		RecallMode:           "balanced",
 	},
 }
 
@@ -250,6 +261,7 @@ func ResolvePlasticity(cfg *PlasticityConfig) ResolvedPlasticity {
 		BehaviorMode:         p.BehaviorMode,
 		InlineEnrichment:     p.InlineEnrichment,
 		EnrichmentEnabled:    p.EnrichmentEnabled,
+		RecallMode:           p.RecallMode,
 	}
 
 	if cfg == nil {
@@ -393,6 +405,9 @@ func ResolvePlasticity(cfg *PlasticityConfig) ResolvedPlasticity {
 	if cfg.EnrichmentEnabled != nil {
 		r.EnrichmentEnabled = *cfg.EnrichmentEnabled
 	}
+	if cfg.RecallMode != nil && ValidRecallMode(*cfg.RecallMode) {
+		r.RecallMode = *cfg.RecallMode
+	}
 
 	return r
 }
@@ -417,6 +432,15 @@ var validInlineEnrichments = map[string]bool{
 
 func validInlineEnrichment(s string) bool {
 	return validInlineEnrichments[s]
+}
+
+// ValidRecallMode returns true if s is a known recall mode name.
+func ValidRecallMode(s string) bool {
+	switch s {
+	case "semantic", "recent", "balanced", "deep":
+		return true
+	}
+	return false
 }
 
 // ValidPlasticityPreset returns true if s is a known preset name.

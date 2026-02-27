@@ -23,6 +23,7 @@ document.addEventListener('alpine:init', () => {
     memories: [],
     totalMemories: 0,
     searchQuery: '',
+    searchMode: 'balanced',
     page: 0,
     memoriesLoading: false,
     selectedMemory: null,
@@ -128,6 +129,7 @@ document.addEventListener('alpine:init', () => {
       ftsWeight: null,
       relevanceFloor: null,
       temporalHalflife: null,
+      recallMode: 'balanced',
     },
     plasticitySaving: false,
     plasticitySaveOk: false,
@@ -585,13 +587,17 @@ document.addEventListener('alpine:init', () => {
       this.memoriesLoading = true;
       try {
         // ActivateRequest uses context:[]string, max_results:int
-        const data = await this.apiCall('/api/activate', {
-          method: 'POST',
-          body: JSON.stringify({
+        const body = {
             context: [this.searchQuery.trim()],
             vault: this.vault,
             max_results: 20,
-          }),
+        };
+        if (this.searchMode && this.searchMode !== 'balanced') {
+            body.mode = this.searchMode;
+        }
+        const data = await this.apiCall('/api/activate', {
+          method: 'POST',
+          body: JSON.stringify(body),
         });
         // ActivateResponse has activations: [{id, concept, content, confidence, score}]
         const items = data.activations || data.results || [];
@@ -898,6 +904,7 @@ document.addEventListener('alpine:init', () => {
             this.plasticityForm.ftsWeight      = cfg.fts_weight      ?? null;
             this.plasticityForm.relevanceFloor     = cfg.relevance_floor     ?? null;
             this.plasticityForm.temporalHalflife = cfg.temporal_halflife ?? null;
+            this.plasticityForm.recallMode = cfg.recall_mode || data.resolved?.recall_mode || 'balanced';
         } catch (err) {
             console.error('loadPlasticity error:', err);
             this.plasticitySaveErr = 'Failed to load Plasticity settings';
@@ -1009,6 +1016,7 @@ document.addEventListener('alpine:init', () => {
         this.plasticitySaveErr = '';
         try {
             const payload = { version: 1, preset: this.plasticityForm.preset };
+            payload.recall_mode = this.plasticityForm.recallMode;
             if (this.plasticityForm.showAdvanced) {
                 if (this.plasticityForm.hopDepth       !== null) payload.hop_depth       = this.plasticityForm.hopDepth;
                 if (this.plasticityForm.semanticWeight !== null) payload.semantic_weight = this.plasticityForm.semanticWeight;

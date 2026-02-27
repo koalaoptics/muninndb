@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	localModelDim   = 384  // all-MiniLM-L6-v2 output dimension
+	localModelDim   = 384  // bge-small-en-v1.5 output dimension
 	localMaxTokens  = 256  // model max sequence length
 	localMaxBatch   = 64   // texts per ORT inference call (DynamicAdvancedSession)
 	ortSentinelFile = ".ort_extracted"
@@ -31,7 +31,7 @@ var (
 	ortInitErr  error
 )
 
-// LocalProvider implements Provider using the bundled all-MiniLM-L6-v2 ONNX model.
+// LocalProvider implements Provider using the bundled bge-small-en-v1.5 ONNX model.
 // No external process or network connection is required; all assets are embedded
 // in the binary and extracted to DataDir on first Init.
 //
@@ -62,7 +62,7 @@ func (p *LocalProvider) Init(ctx context.Context, cfg ProviderHTTPConfig) (int, 
 		dataDir = "muninndb-data"
 	}
 
-	modelDir := filepath.Join(dataDir, "models", "miniLM")
+	modelDir := filepath.Join(dataDir, "models", "bge-small")
 	if err := os.MkdirAll(modelDir, 0o755); err != nil {
 		return 0, fmt.Errorf("local provider: cannot create model dir %s: %w", modelDir, err)
 	}
@@ -128,7 +128,7 @@ func (p *LocalProvider) Init(ctx context.Context, cfg ProviderHTTPConfig) (int, 
 	p.session = session
 
 	slog.Info("local embed provider initialized",
-		"model", "all-MiniLM-L6-v2",
+		"model", "bge-small-en-v1.5",
 		"dimension", localModelDim,
 		"model_dir", modelDir,
 	)
@@ -225,19 +225,28 @@ func (p *LocalProvider) EmbedBatch(ctx context.Context, texts []string) ([]float
 	}
 
 	// Unpack output shape [batchSize, localMaxTokens, localModelDim].
-	// For each sequence: mean-pool over non-padding tokens, then L2-normalise.
+	// For each sequence: extract the [CLS] token embedding (position 0), then L2-normalise.
+	// bge-small-en-v1.5 encodes sentence meaning into the [CLS] token, not mean-pooled tokens.
 	hidden := outputTensor.GetData()
 	result := make([]float32, 0, batchSize*localModelDim)
 	seqStride := localMaxTokens * localModelDim
 	for i := 0; i < batchSize; i++ {
 		seqHidden := hidden[i*seqStride : (i+1)*seqStride]
-		seqMask := maskBuf[i*localMaxTokens : (i+1)*localMaxTokens]
-		vec := meanPool(seqHidden, seqMask, localMaxTokens, localModelDim)
+		vec := clsPool(seqHidden, localModelDim)
 		l2Normalize(vec)
 		result = append(result, vec...)
 	}
 
 	return result, nil
+}
+
+// clsPool extracts the [CLS] token embedding at position 0.
+// BGE models (bge-small-en-v1.5) encode sentence meaning into the [CLS] token.
+// hidden: flat [seqLen, dim] slice for a single sequence.
+func clsPool(hidden []float32, dim int) []float32 {
+	result := make([]float32, dim)
+	copy(result, hidden[:dim])
+	return result
 }
 
 // meanPool computes the mean of token embeddings weighted by the attention mask.

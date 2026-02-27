@@ -160,7 +160,7 @@ type searchOptions struct {
 	query   string
 	since   string // RFC3339
 	before  string // RFC3339
-	mode    string // "actr", "cgdn", or "" (additive/default)
+	mode    string // "semantic", "recent", "balanced", "deep", "cgdn", or "" (default)
 	hops    int    // 0 = not set
 	profile string
 }
@@ -216,13 +216,18 @@ func parseSearchFlags(input string) (searchOptions, string) {
 			}
 			opts.before = val
 		case "--mode":
-			if val != "actr" && val != "cgdn" && val != "additive" && val != "" {
-				return opts, fmt.Sprintf("--mode: unknown value %q (valid: actr, cgdn, additive)", val)
+			switch val {
+			case "semantic", "recent", "balanced", "deep":
+				opts.mode = val
+			case "actr":
+				opts.mode = "balanced" // legacy alias
+			case "cgdn":
+				opts.mode = val // pass through for power users
+			case "additive", "":
+				opts.mode = "" // default
+			default:
+				return opts, fmt.Sprintf("--mode: unknown %q (valid: semantic, recent, balanced, deep)", val)
 			}
-			if val == "additive" {
-				val = "" // additive is the default; pass empty string to MCP
-			}
-			opts.mode = val
 		case "--hops":
 			n, err := strconv.Atoi(val)
 			if err != nil || n < 0 {
@@ -253,7 +258,7 @@ func (r *replState) cmdSearch(input string) {
 		return
 	}
 	if opts.query == "" {
-		fmt.Println("  Usage:   search <query> [--since ISO8601] [--before ISO8601] [--mode actr|cgdn|additive] [--hops N] [--profile default|causal|confirmatory|adversarial|structural]")
+		fmt.Println("  Usage:   search <query> [--mode semantic|recent|balanced|deep] [--since ISO8601] [--before ISO8601] [--hops N] [--profile default|causal|confirmatory|adversarial|structural]")
 		fmt.Println("  Example: search decisions about authentication --since 2026-01-01")
 		return
 	}

@@ -1055,7 +1055,8 @@ func (e *Engine) activateCore(ctx context.Context, req *mbp.ActivateRequest, str
 			CGDNAlpha:          req.Weights.CGDNAlpha,
 			CGDNBeta:           req.Weights.CGDNBeta,
 			CGDNPower:          req.Weights.CGDNPower,
-			UseACTR:            true, // only path for now; legacy temporal code kept for possible future use
+			UseACTR:            !req.Weights.DisableACTR,
+			DisableACTR:        req.Weights.DisableACTR,
 			ACTRDecay:          req.Weights.ACTRDecay,
 			ACTRHebScale:       req.Weights.ACTRHebScale,
 		}
@@ -1090,6 +1091,39 @@ func (e *Engine) activateCore(ctx context.Context, req *mbp.ActivateRequest, str
 	// Gate CGDN behind vault's ExperimentalCGDN flag.
 	if actReq.Weights.UseCGDN && !resolved.ExperimentalCGDN {
 		actReq.Weights.UseCGDN = false
+	}
+
+	// Apply vault default recall mode when no explicit mode was set by the caller.
+	// When a caller explicitly sets Mode on the request, the REST handler or MCP handler
+	// already applied the preset; the engine only applies the vault default when Mode is empty.
+	if req.Mode == "" && resolved.RecallMode != "" && resolved.RecallMode != "balanced" {
+		preset, mErr := auth.LookupRecallMode(resolved.RecallMode)
+		if mErr == nil {
+			if preset.Threshold > 0 && req.Threshold == 0 {
+				actReq.Threshold = float64(preset.Threshold)
+			}
+			if preset.MaxHops > 0 && req.MaxHops == 0 {
+				actReq.HopDepth = preset.MaxHops
+			}
+			if preset.SemanticSimilarity > 0 || preset.FullTextRelevance > 0 || preset.Recency > 0 || preset.DisableACTR {
+				w := actReq.Weights
+				if w != nil {
+					if preset.SemanticSimilarity > 0 && w.SemanticSimilarity == 0 {
+						w.SemanticSimilarity = preset.SemanticSimilarity
+					}
+					if preset.FullTextRelevance > 0 && w.FullTextRelevance == 0 {
+						w.FullTextRelevance = preset.FullTextRelevance
+					}
+					if preset.Recency > 0 && w.Recency == 0 {
+						w.Recency = preset.Recency
+					}
+					if preset.DisableACTR {
+						w.DisableACTR = true
+						w.UseACTR = false
+					}
+				}
+			}
+		}
 	}
 
 	// Convert filters if provided

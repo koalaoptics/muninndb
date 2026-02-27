@@ -896,14 +896,14 @@ func TestParseSearchFlagsSinceRFC3339(t *testing.T) {
 	}
 }
 
-// TestParseSearchFlagsModeActr tests --mode actr.
+// TestParseSearchFlagsModeActr tests --mode actr maps to "balanced" (legacy alias).
 func TestParseSearchFlagsModeActr(t *testing.T) {
 	opts, errMsg := parseSearchFlags("memory recall --mode actr")
 	if errMsg != "" {
 		t.Fatalf("unexpected error: %s", errMsg)
 	}
-	if opts.mode != "actr" {
-		t.Errorf("mode = %q, want %q", opts.mode, "actr")
+	if opts.mode != "balanced" {
+		t.Errorf("mode = %q, want %q", opts.mode, "balanced")
 	}
 }
 
@@ -915,6 +915,43 @@ func TestParseSearchFlagsModeAdditive(t *testing.T) {
 	}
 	if opts.mode != "" {
 		t.Errorf("mode = %q, want empty string for additive", opts.mode)
+	}
+}
+
+// TestParseSearchFlagsFriendlyModes tests all four friendly mode names.
+func TestParseSearchFlagsFriendlyModes(t *testing.T) {
+	for _, mode := range []string{"semantic", "recent", "balanced", "deep"} {
+		opts, errMsg := parseSearchFlags("test query --mode " + mode)
+		if errMsg != "" {
+			t.Errorf("mode %q: unexpected error: %s", mode, errMsg)
+			continue
+		}
+		if opts.mode != mode {
+			t.Errorf("mode %q: got %q", mode, opts.mode)
+		}
+	}
+}
+
+// TestParseSearchFlagsModeBalancedNotSentToMCP tests that balanced mode is stored as-is.
+func TestParseSearchFlagsModeBalancedNotSentToMCP(t *testing.T) {
+	opts, errMsg := parseSearchFlags("test --mode balanced")
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	// balanced is stored as "balanced" (not empty) — the MCP handler recognizes it
+	if opts.mode != "balanced" {
+		t.Errorf("mode = %q, want %q", opts.mode, "balanced")
+	}
+}
+
+// TestParseSearchFlagsModeCgdnPassthrough tests cgdn passes through for power users.
+func TestParseSearchFlagsModeCgdnPassthrough(t *testing.T) {
+	opts, errMsg := parseSearchFlags("test --mode cgdn")
+	if errMsg != "" {
+		t.Fatalf("unexpected error: %s", errMsg)
+	}
+	if opts.mode != "cgdn" {
+		t.Errorf("mode = %q, want %q", opts.mode, "cgdn")
 	}
 }
 
@@ -986,8 +1023,8 @@ func TestParseSearchFlagsInvalidMode(t *testing.T) {
 	if errMsg == "" {
 		t.Fatal("expected error for invalid mode, got none")
 	}
-	if !strings.Contains(errMsg, "unknown value") {
-		t.Errorf("error should mention 'unknown value': %s", errMsg)
+	if !strings.Contains(errMsg, "unknown") {
+		t.Errorf("error should mention 'unknown': %s", errMsg)
 	}
 }
 
@@ -1074,8 +1111,8 @@ func TestCmdSearchWithFlags(t *testing.T) {
 	if args["since"] != "2026-01-01T00:00:00Z" {
 		t.Errorf("since = %v, want %q", args["since"], "2026-01-01T00:00:00Z")
 	}
-	if args["mode"] != "actr" {
-		t.Errorf("mode = %v, want %q", args["mode"], "actr")
+	if args["mode"] != "balanced" {
+		t.Errorf("mode = %v, want %q", args["mode"], "balanced")
 	}
 	if args["max_hops"] != float64(2) && args["max_hops"] != 2 {
 		t.Errorf("max_hops = %v, want 2", args["max_hops"])

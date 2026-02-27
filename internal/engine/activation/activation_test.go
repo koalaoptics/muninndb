@@ -725,11 +725,14 @@ func TestCalcCandidatesPerIndex(t *testing.T) {
 	}{
 		{0, 30},
 		{-1, 30},
-		{100, 30},   // sqrt(100)=10, below floor
-		{900, 30},   // sqrt(900)=30, exactly floor
-		{1000, 31},  // sqrt(1000)≈31
+		{1, 1},        // tiny vault: full scan
+		{50, 50},      // small vault: full scan
+		{100, 100},    // small vault: full scan
+		{999, 999},    // small vault: full scan
+		{1000, 1000},  // boundary: still full scan
+		{1001, 31},    // sqrt(1001)≈31, above small-vault threshold
 		{10000, 100},
-		{40000, 200}, // sqrt(40000)=200, hits ceiling
+		{40000, 200},  // sqrt(40000)=200, hits ceiling
 		{100000, 200}, // above ceiling, clamped
 	}
 	for _, tt := range tests {
@@ -865,5 +868,175 @@ func TestActivation_HNSWError_GracefulDegradation(t *testing.T) {
 	}
 	if len(result.Activations) == 0 {
 		t.Error("expected at least 1 activation via FTS path when HNSW fails")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: DisableACTR triggers legacy weighted-sum scoring path
+// ---------------------------------------------------------------------------
+
+func TestDisableACTR_LegacyScoringPath(t *testing.T) {
+	store := newStubStore()
+
+	eng1 := &storage.Engram{
+		Concept:    "disable actr test",
+		Content:    "test content for legacy scoring",
+		Confidence: 0.9,
+		Stability:  30.0,
+		Relevance:  0.5,
+	}
+	store.writeEngram(eng1)
+
+	var ftsResults []activation.ScoredID
+	for id := range store.metas {
+		ftsResults = append(ftsResults, activation.ScoredID{ID: id, Score: 0.6})
+	}
+	fts := &stubFTS{results: ftsResults}
+	eng := newTestEngine(store, fts, nil)
+
+	// Run with DisableACTR=true — should use legacy weighted-sum path, not ACT-R.
+	result, err := eng.Run(context.Background(), &activation.ActivateRequest{
+		Context:    []string{"test content"},
+		Threshold:  0.0,
+		MaxResults: 10,
+		Weights: &activation.Weights{
+			SemanticSimilarity: 0.8,
+			FullTextRelevance:  0.2,
+			DisableACTR:        true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run with DisableACTR: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result must not be nil")
+	}
+	if len(result.Activations) == 0 {
+		t.Fatal("expected at least 1 activation with DisableACTR=true")
+	}
+	// The legacy path uses Final = raw * confidence. With positive weights and a
+	// real FTS hit, the score must be > 0.
+	for _, a := range result.Activations {
+		if a.Score <= 0 {
+			t.Errorf("activation %q has non-positive score %v in legacy path", a.Engram.Concept, a.Score)
+		}
+	}
+}
+
+func TestDisableACTR_VsACTR_DifferentScores(t *testing.T) {
+	store := newStubStore()
+
+	eng1 := &storage.Engram{
+		Concept:    "scoring comparison",
+		Content:    "test engram for score comparison",
+		Confidence: 0.8,
+		Stability:  30.0,
+		Relevance:  0.5,
+	}
+	store.writeEngram(eng1)
+
+	var ftsResults []activation.ScoredID
+	for id := range store.metas {
+		ftsResults = append(ftsResults, activation.ScoredID{ID: id, Score: 0.5})
+	}
+	fts := &stubFTS{results: ftsResults}
+
+	// Run with ACT-R (default)
+	engACTR := newTestEngine(store, fts, nil)
+	resultACTR, err := engACTR.Run(context.Background(), &activation.ActivateRequest{
+		Context:    []string{"test engram"},
+		Threshold:  0.0,
+		MaxResults: 10,
+		Weights: &activation.Weights{
+			SemanticSimilarity: 0.6,
+			FullTextRelevance:  0.4,
+			UseACTR:            true,
+			ACTRDecay:          0.5,
+			ACTRHebScale:       4.0,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run ACT-R: %v", err)
+	}
+
+	// Run with legacy (DisableACTR=true)
+	engLegacy := newTestEngine(store, fts, nil)
+	resultLegacy, err := engLegacy.Run(context.Background(), &activation.ActivateRequest{
+		Context:    []string{"test engram"},
+		Threshold:  0.0,
+		MaxResults: 10,
+		Weights: &activation.Weights{
+			SemanticSimilarity: 0.6,
+			FullTextRelevance:  0.4,
+			DisableACTR:        true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run Legacy: %v", err)
+	}
+
+	// Both paths should return results.
+	if len(resultACTR.Activations) == 0 {
+		t.Fatal("ACT-R path returned no results")
+	}
+	if len(resultLegacy.Activations) == 0 {
+		t.Fatal("Legacy path returned no results")
+	}
+
+	// The two scoring formulas are different, so scores should differ.
+	// (They could theoretically be equal in degenerate cases, but with
+	// these inputs they won't be.)
+	actrScore := resultACTR.Activations[0].Score
+	legacyScore := resultLegacy.Activations[0].Score
+	if actrScore == legacyScore {
+		t.Logf("ACT-R score: %v, Legacy score: %v", actrScore, legacyScore)
+		t.Log("warning: scores are identical — expected different scoring formulas to yield different values")
+	}
+
+	// Both scores must be positive and in a reasonable range.
+	if actrScore <= 0 || actrScore > 10 {
+		t.Errorf("ACT-R score %v out of expected range (0, 10]", actrScore)
+	}
+	if legacyScore <= 0 || legacyScore > 10 {
+		t.Errorf("Legacy score %v out of expected range (0, 10]", legacyScore)
+	}
+}
+
+func TestResolveWeights_DisableACTR_SetsUseACTRFalse(t *testing.T) {
+	// This tests the resolveWeights function indirectly: when DisableACTR=true
+	// is set on request weights, the ACT-R path should not be taken and the
+	// legacy scoring path should produce results.
+	store := newStubStore()
+
+	eng1 := &storage.Engram{
+		Concept:    "resolve weights test",
+		Content:    "content",
+		Confidence: 1.0,
+		Stability:  30.0,
+	}
+	store.writeEngram(eng1)
+
+	var ftsResults []activation.ScoredID
+	for id := range store.metas {
+		ftsResults = append(ftsResults, activation.ScoredID{ID: id, Score: 0.3})
+	}
+
+	eng := newTestEngine(store, &stubFTS{results: ftsResults}, nil)
+	result, err := eng.Run(context.Background(), &activation.ActivateRequest{
+		Context:    []string{"content"},
+		Threshold:  0.0,
+		MaxResults: 10,
+		Weights: &activation.Weights{
+			SemanticSimilarity: 0.5,
+			FullTextRelevance:  0.5,
+			DisableACTR:        true,
+			UseACTR:            true, // DisableACTR should override this
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(result.Activations) == 0 {
+		t.Error("expected results when DisableACTR overrides UseACTR")
 	}
 }

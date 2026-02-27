@@ -213,6 +213,25 @@ func (s *MCPServer) handleRecall(ctx context.Context, w http.ResponseWriter, id 
 		req.MaxHops = modePreset.MaxHops
 	}
 
+	// Apply mode preset scoring weights to the request.
+	if modePreset.SemanticSimilarity > 0 || modePreset.FullTextRelevance > 0 || modePreset.Recency > 0 || modePreset.DisableACTR {
+		if req.Weights == nil {
+			req.Weights = &mbp.Weights{}
+		}
+		if modePreset.SemanticSimilarity > 0 {
+			req.Weights.SemanticSimilarity = modePreset.SemanticSimilarity
+		}
+		if modePreset.FullTextRelevance > 0 {
+			req.Weights.FullTextRelevance = modePreset.FullTextRelevance
+		}
+		if modePreset.Recency > 0 {
+			req.Weights.Recency = modePreset.Recency
+		}
+		if modePreset.DisableACTR {
+			req.Weights.DisableACTR = true
+		}
+	}
+
 	// Temporal filters: since / before
 	if sinceStr, ok := args["since"].(string); ok && sinceStr != "" {
 		t, err := time.Parse(time.RFC3339, sinceStr)

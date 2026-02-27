@@ -353,3 +353,133 @@ func TestEnrichmentEnabled_AllPresetsDefaultTrue(t *testing.T) {
 		}
 	}
 }
+
+// --- RecallMode tests ---
+
+func TestValidRecallMode_AllValid(t *testing.T) {
+	for _, mode := range []string{"semantic", "recent", "balanced", "deep"} {
+		if !ValidRecallMode(mode) {
+			t.Errorf("ValidRecallMode(%q) = false, want true", mode)
+		}
+	}
+}
+
+func TestValidRecallMode_Invalid(t *testing.T) {
+	for _, mode := range []string{"turbo", "fast", "actr", "cgdn", "", "SEMANTIC"} {
+		if ValidRecallMode(mode) {
+			t.Errorf("ValidRecallMode(%q) = true, want false", mode)
+		}
+	}
+}
+
+func TestRecallMode_AllPresetsDefaultBalanced(t *testing.T) {
+	presets := []string{"default", "reference", "scratchpad", "knowledge-graph"}
+	for _, name := range presets {
+		r := ResolvePlasticity(&PlasticityConfig{Preset: name})
+		if r.RecallMode != "balanced" {
+			t.Errorf("preset %q: RecallMode = %q, want %q", name, r.RecallMode, "balanced")
+		}
+	}
+}
+
+func TestRecallMode_NilConfigDefaultsBalanced(t *testing.T) {
+	r := ResolvePlasticity(nil)
+	if r.RecallMode != "balanced" {
+		t.Errorf("nil config: RecallMode = %q, want %q", r.RecallMode, "balanced")
+	}
+}
+
+func TestRecallMode_Override(t *testing.T) {
+	mode := "semantic"
+	r := ResolvePlasticity(&PlasticityConfig{RecallMode: &mode})
+	if r.RecallMode != "semantic" {
+		t.Errorf("RecallMode = %q, want %q", r.RecallMode, "semantic")
+	}
+}
+
+func TestRecallMode_InvalidOverrideKeepsPreset(t *testing.T) {
+	mode := "turbo"
+	r := ResolvePlasticity(&PlasticityConfig{RecallMode: &mode})
+	if r.RecallMode != "balanced" {
+		t.Errorf("invalid override: RecallMode = %q, want %q (preset default)", r.RecallMode, "balanced")
+	}
+}
+
+func TestRecallMode_AllFourModesOverride(t *testing.T) {
+	for _, mode := range []string{"semantic", "recent", "balanced", "deep"} {
+		m := mode
+		r := ResolvePlasticity(&PlasticityConfig{RecallMode: &m})
+		if r.RecallMode != mode {
+			t.Errorf("override %q: RecallMode = %q", mode, r.RecallMode)
+		}
+	}
+}
+
+func TestLookupRecallMode_AllKnown(t *testing.T) {
+	for _, name := range []string{"semantic", "recent", "balanced", "deep"} {
+		p, err := LookupRecallMode(name)
+		if err != nil {
+			t.Errorf("LookupRecallMode(%q): unexpected error: %v", name, err)
+		}
+		_ = p
+	}
+}
+
+func TestLookupRecallMode_Unknown(t *testing.T) {
+	_, err := LookupRecallMode("turbo")
+	if err == nil {
+		t.Error("LookupRecallMode(turbo): expected error, got nil")
+	}
+}
+
+func TestLookupRecallMode_SemanticValues(t *testing.T) {
+	p, err := LookupRecallMode("semantic")
+	if err != nil {
+		t.Fatalf("LookupRecallMode(semantic): %v", err)
+	}
+	if p.Threshold != 0.3 {
+		t.Errorf("semantic Threshold = %v, want 0.3", p.Threshold)
+	}
+	if p.SemanticSimilarity != 0.8 {
+		t.Errorf("semantic SemanticSimilarity = %v, want 0.8", p.SemanticSimilarity)
+	}
+	if !p.DisableACTR {
+		t.Error("semantic DisableACTR should be true")
+	}
+}
+
+func TestLookupRecallMode_DeepValues(t *testing.T) {
+	p, err := LookupRecallMode("deep")
+	if err != nil {
+		t.Fatalf("LookupRecallMode(deep): %v", err)
+	}
+	if p.MaxHops != 4 {
+		t.Errorf("deep MaxHops = %d, want 4", p.MaxHops)
+	}
+	if p.Threshold != 0.1 {
+		t.Errorf("deep Threshold = %v, want 0.1", p.Threshold)
+	}
+}
+
+func TestLookupRecallMode_RecentValues(t *testing.T) {
+	p, err := LookupRecallMode("recent")
+	if err != nil {
+		t.Fatalf("LookupRecallMode(recent): %v", err)
+	}
+	if p.Recency != 0.7 {
+		t.Errorf("recent Recency = %v, want 0.7", p.Recency)
+	}
+	if p.MaxHops != 1 {
+		t.Errorf("recent MaxHops = %d, want 1", p.MaxHops)
+	}
+}
+
+func TestLookupRecallMode_BalancedIsZero(t *testing.T) {
+	p, err := LookupRecallMode("balanced")
+	if err != nil {
+		t.Fatalf("LookupRecallMode(balanced): %v", err)
+	}
+	if p.MaxHops != 0 || p.Threshold != 0 || p.SemanticSimilarity != 0 || p.Recency != 0 {
+		t.Errorf("balanced should be all zero values, got %+v", p)
+	}
+}

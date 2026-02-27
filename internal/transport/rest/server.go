@@ -631,12 +631,49 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 	if req.Vault == "" {
 		req.Vault = ctxVault(r)
 	}
+	// Apply recall mode preset if provided.
+	if req.Mode != "" {
+		preset, err := auth.LookupRecallMode(req.Mode)
+		if err != nil {
+			s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, err.Error())
+			return
+		}
+		applyRecallModePreset(&req, preset)
+	}
 	resp, err := s.engine.Activate(r.Context(), &req)
 	if err != nil {
 		s.sendError(r, w, http.StatusInternalServerError, ErrIndexError, err.Error())
 		return
 	}
 	s.sendJSON(w, http.StatusOK, resp)
+}
+
+// applyRecallModePreset applies non-zero recall mode preset fields to an ActivateRequest,
+// only when the caller has not already set the corresponding field.
+func applyRecallModePreset(req *ActivateRequest, preset auth.RecallModePreset) {
+	if preset.Threshold > 0 && req.Threshold == 0 {
+		req.Threshold = preset.Threshold
+	}
+	if preset.MaxHops > 0 && req.MaxHops == 0 {
+		req.MaxHops = preset.MaxHops
+	}
+	if preset.SemanticSimilarity > 0 || preset.FullTextRelevance > 0 || preset.Recency > 0 || preset.DisableACTR {
+		if req.Weights == nil {
+			req.Weights = &mbp.Weights{}
+		}
+		if preset.SemanticSimilarity > 0 && req.Weights.SemanticSimilarity == 0 {
+			req.Weights.SemanticSimilarity = preset.SemanticSimilarity
+		}
+		if preset.FullTextRelevance > 0 && req.Weights.FullTextRelevance == 0 {
+			req.Weights.FullTextRelevance = preset.FullTextRelevance
+		}
+		if preset.Recency > 0 && req.Weights.Recency == 0 {
+			req.Weights.Recency = preset.Recency
+		}
+		if preset.DisableACTR {
+			req.Weights.DisableACTR = true
+		}
+	}
 }
 
 func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {

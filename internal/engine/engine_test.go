@@ -1614,3 +1614,126 @@ func TestWriteBatch_EmptyBatch(t *testing.T) {
 		t.Errorf("expected 0 errors, got %d", len(errs))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Test: Vault-default recall mode is applied by activateCore
+// ---------------------------------------------------------------------------
+
+func TestActivateCore_VaultDefaultRecallMode(t *testing.T) {
+	dir, err := os.MkdirTemp("", "muninndb-recallmode-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	db, err := storage.OpenPebble(dir, storage.DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store := storage.NewPebbleStore(db, storage.PebbleStoreConfig{CacheSize: 1000})
+	ftsIdx := fts.New(db)
+
+	embedder := &noopEmbedder{}
+	actEngine := activation.New(store, &ftsAdapter{ftsIdx}, nil, embedder)
+	trigSystem := trigger.New(store, &ftsTrigAdapter{ftsIdx}, nil, embedder)
+
+	// Configure vault with recall_mode = "semantic".
+	// "semantic" preset: DisableACTR=true, SemanticSimilarity=0.8,
+	// FullTextRelevance=0.2, Threshold=0.3.
+	as := auth.NewStore(db)
+	semanticMode := "semantic"
+	if err := as.SetVaultConfig(auth.VaultConfig{
+		Name:   "recalltest",
+		Public: true,
+		Plasticity: &auth.PlasticityConfig{
+			RecallMode: &semanticMode,
+		},
+	}); err != nil {
+		t.Fatalf("SetVaultConfig: %v", err)
+	}
+
+	eng := NewEngine(store, as, ftsIdx, actEngine, trigSystem, nil, nil, nil, embedder, nil)
+	defer func() {
+		eng.Stop()
+		store.Close()
+	}()
+
+	ctx := context.Background()
+
+	// Write an engram so Activate has something to process.
+	if _, err := eng.Write(ctx, &mbp.WriteRequest{
+		Vault:   "recalltest",
+		Concept: "semantic recall test",
+		Content: "testing vault default recall mode application",
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// Call Activate with no Mode on the request.
+	// activateCore should detect resolved.RecallMode="semantic" and apply the preset.
+	resp, err := eng.Activate(ctx, &mbp.ActivateRequest{
+		Vault:      "recalltest",
+		Context:    []string{"semantic recall"},
+		MaxResults: 10,
+		Threshold:  0,
+		Mode:       "", // no explicit mode — triggers vault-default path
+	})
+	if err != nil {
+		t.Fatalf("Activate with vault default recall mode: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.QueryID == "" {
+		t.Error("QueryID must not be empty")
+	}
+
+	// Now test with explicit Mode — this should bypass vault default.
+	resp2, err := eng.Activate(ctx, &mbp.ActivateRequest{
+		Vault:      "recalltest",
+		Context:    []string{"semantic recall"},
+		MaxResults: 10,
+		Threshold:  0,
+		Mode:       "deep", // explicit mode bypasses vault default
+	})
+	if err != nil {
+		t.Fatalf("Activate with explicit deep mode: %v", err)
+	}
+	if resp2 == nil {
+		t.Fatal("expected non-nil response for explicit mode")
+	}
+
+	// Test "recent" mode as vault default too, to exercise a different preset.
+	recentMode := "recent"
+	if err := as.SetVaultConfig(auth.VaultConfig{
+		Name:   "recentvault",
+		Public: true,
+		Plasticity: &auth.PlasticityConfig{
+			RecallMode: &recentMode,
+		},
+	}); err != nil {
+		t.Fatalf("SetVaultConfig recent: %v", err)
+	}
+
+	if _, err := eng.Write(ctx, &mbp.WriteRequest{
+		Vault:   "recentvault",
+		Concept: "recent mode test",
+		Content: "testing recent recall mode vault default",
+	}); err != nil {
+		t.Fatalf("Write to recentvault: %v", err)
+	}
+
+	resp3, err := eng.Activate(ctx, &mbp.ActivateRequest{
+		Vault:      "recentvault",
+		Context:    []string{"recent mode"},
+		MaxResults: 10,
+		Threshold:  0,
+	})
+	if err != nil {
+		t.Fatalf("Activate with vault default recent mode: %v", err)
+	}
+	if resp3 == nil {
+		t.Fatal("expected non-nil response for recent vault")
+	}
+}

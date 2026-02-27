@@ -184,8 +184,8 @@ func (r *replState) handleCommand(line string) bool {
 
 	case "search":
 		if len(args) == 0 {
-			fmt.Println("  Usage:   search <query> [--since ISO8601] [--before ISO8601] [--mode actr|cgdn|additive] [--hops N] [--profile default|causal|confirmatory|adversarial|structural]")
-			fmt.Println("  Example: search authentication decisions --since 2026-01-01 --mode actr")
+			fmt.Println("  Usage:   search <query> [--mode semantic|recent|balanced|deep] [--since ISO8601] [--before ISO8601] [--hops N] [--profile default|causal|confirmatory|adversarial|structural]")
+			fmt.Println("  Example: search authentication decisions --since 2026-01-01 --mode semantic")
 			fmt.Println("  Tip:     use natural language — semantic search, not keyword matching")
 			return false
 		}

@@ -2,7 +2,7 @@ ASSETS_DIR := internal/plugin/embed/assets
 ORT_VERSION := 1.24.2
 # ORT dropped Intel Mac support after v1.23.2; pin darwin/amd64 to the last working version.
 ORT_VERSION_DARWIN_AMD64 := 1.23.2
-MODEL_REPO  := Xenova/all-MiniLM-L6-v2
+MODEL_REPO  := Xenova/bge-small-en-v1.5
 HF_BASE     := https://huggingface.co/$(MODEL_REPO)/resolve/main
 ORT_BASE    := https://github.com/microsoft/onnxruntime/releases/download/v$(ORT_VERSION)
 
@@ -14,14 +14,14 @@ fetch-assets: fetch-model fetch-ort-libs
 
 ## fetch-model: download model_int8.onnx and tokenizer.json from HuggingFace.
 fetch-model:
-	@echo "==> Downloading all-MiniLM-L6-v2 INT8 model..."
+	@echo "==> Downloading bge-small-en-v1.5 INT8 model..."
 	@mkdir -p $(ASSETS_DIR)
 	@curl -fL --progress-bar \
 		"$(HF_BASE)/onnx/model_int8.onnx" \
 		-o "$(ASSETS_DIR)/model_int8.onnx"
 	@echo "==> Downloading tokenizer.json..."
 	@curl -fL --progress-bar \
-		"https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json" \
+		"https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/tokenizer.json" \
 		-o "$(ASSETS_DIR)/tokenizer.json"
 	@echo "    model_int8.onnx: $$(du -sh $(ASSETS_DIR)/model_int8.onnx | cut -f1)"
 	@echo "    tokenizer.json:  $$(du -sh $(ASSETS_DIR)/tokenizer.json  | cut -f1)"
