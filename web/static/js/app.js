@@ -105,6 +105,10 @@ document.addEventListener('alpine:init', () => {
     changePassError: '',
     changePassSuccess: false,
 
+    // Observability
+    obs: null,
+    _obsInterval: null,
+
     // Settings
     settingsTab: 'connect', // 'connect' | 'vault' | 'plugins' | 'keys' | 'admin'
     embedStatus: null,       // loaded from GET /api/admin/embed/status
@@ -273,6 +277,12 @@ document.addEventListener('alpine:init', () => {
     },
 
     _onViewEnter(view) {
+      // Stop observability polling when leaving the tab
+      if (this._obsInterval) {
+        clearInterval(this._obsInterval);
+        this._obsInterval = null;
+      }
+
       if (view === 'dashboard') {
         this.loadStats();
         // Chart init happens after DOM renders
@@ -282,6 +292,9 @@ document.addEventListener('alpine:init', () => {
         this.loadMemories();
       } else if (view === 'session') {
         this.loadSession();
+      } else if (view === 'observability') {
+        this.loadObservability();
+        this._obsInterval = setInterval(() => this.loadObservability(), 5000);
       } else if (view === 'settings') {
         // Check current hash to determine which sub-tab to activate
         const hash = location.hash.replace(/^#\/?/, '');
@@ -560,6 +573,16 @@ document.addEventListener('alpine:init', () => {
       return n.toFixed(1) + ' ' + units[i];
     },
 
+    formatUptime(seconds) {
+      if (!seconds) return '0s';
+      const d = Math.floor(seconds / 86400);
+      const h = Math.floor((seconds % 86400) / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      if (d > 0) return d + 'd ' + h + 'h';
+      if (h > 0) return h + 'h ' + m + 'm';
+      return m + 'm';
+    },
+
     // ── Memories ───────────────────────────────────────────────────────────
     async loadMemories() {
       this.memoriesLoading = true;
@@ -793,6 +816,15 @@ document.addEventListener('alpine:init', () => {
         this.sessionEntries = data.entries || (Array.isArray(data) ? data : []);
       } catch (err) {
         this.addNotification('error', 'Session: ' + err.message);
+      }
+    },
+
+    // ── Observability ─────────────────────────────────────────────────────
+    async loadObservability() {
+      try {
+        this.obs = await this.apiCall('/api/admin/observability');
+      } catch (e) {
+        console.error('Failed to load observability:', e);
       }
     },
 
