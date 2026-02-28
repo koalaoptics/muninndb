@@ -116,6 +116,9 @@ type ReadResponse struct {
 	MemoryType     uint8    `msgpack:"memory_type,omitempty"`
 	TypeLabel      string   `msgpack:"type_label,omitempty"`
 	Classification uint16   `msgpack:"classification,omitempty"`
+	// EmbedDim is the stored embedding dimensionality code (0 = no embedding).
+	// 1 = 384-dim, 2 = 768-dim, 3 = 1536-dim.
+	EmbedDim uint8 `msgpack:"embed_dim,omitempty" json:"embed_dim,omitempty"`
 }
 
 // ActivateRequest queries for relevant engrams.

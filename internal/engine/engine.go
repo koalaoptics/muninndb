@@ -1010,6 +1010,7 @@ func (e *Engine) Read(ctx context.Context, req *mbp.ReadRequest) (*mbp.ReadRespo
 		MemoryType:     uint8(eng.MemoryType),
 		TypeLabel:      eng.TypeLabel,
 		Classification: eng.Classification,
+		EmbedDim:       uint8(eng.EmbedDim),
 	}, nil
 }
 

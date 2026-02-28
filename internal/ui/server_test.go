@@ -140,6 +140,9 @@ func (m *mockEngine) Explain(ctx context.Context, vault string, req *rest.Explai
 func (m *mockEngine) UpdateState(ctx context.Context, vault, engramID, state, reason string) error {
 	return nil
 }
+func (m *mockEngine) UpdateTags(ctx context.Context, vault, engramID string, tags []string) error {
+	return nil
+}
 func (m *mockEngine) ListDeleted(ctx context.Context, vault string, limit int) (*rest.ListDeletedResponse, error) {
 	return &rest.ListDeletedResponse{}, nil
 }

@@ -126,6 +126,7 @@ type EngineAPI interface {
 	Traverse(ctx context.Context, vault string, req *TraverseRequest) (*TraverseResponse, error)
 	Explain(ctx context.Context, vault string, req *ExplainRequest) (*ExplainResponse, error)
 	UpdateState(ctx context.Context, vault, engramID, state, reason string) error
+	UpdateTags(ctx context.Context, vault, engramID string, tags []string) error
 	ListDeleted(ctx context.Context, vault string, limit int) (*ListDeletedResponse, error)
 	RetryEnrich(ctx context.Context, vault, engramID string) (*RetryEnrichResponse, error)
 	GetContradictions(ctx context.Context, vault string) (*ContradictionsResponse, error)
@@ -143,13 +144,23 @@ type EngramItem struct {
 	Tags       []string `json:"tags,omitempty"`
 	Vault      string   `json:"vault"`
 	CreatedAt  int64    `json:"createdAt"`
+	// EmbedDim is the stored embedding dimensionality code (0 = no embedding).
+	// 1 = 384-dim, 2 = 768-dim, 3 = 1536-dim.
+	EmbedDim uint8 `json:"embed_dim,omitempty"`
 }
 
-// ListEngramsRequest lists engrams for a vault.
+// ListEngramsRequest lists engrams for a vault with optional filtering and sorting.
 type ListEngramsRequest struct {
-	Vault  string `json:"vault"`
-	Limit  int    `json:"limit"`
-	Offset int    `json:"offset"`
+	Vault   string   `json:"vault"`
+	Limit   int      `json:"limit"`
+	Offset  int      `json:"offset"`
+	Sort    string   `json:"sort"`             // "created" (default) or "accessed"
+	Tags    []string `json:"tags,omitempty"`   // AND logic — engram must have ALL tags
+	State   string   `json:"state,omitempty"`  // lifecycle state filter
+	MinConf float32  `json:"min_confidence"`   // minimum confidence (0 = no min)
+	MaxConf float32  `json:"max_confidence"`   // maximum confidence (0 = no max)
+	Since   string   `json:"since,omitempty"`  // RFC3339 — created after
+	Before  string   `json:"before,omitempty"` // RFC3339 — created before
 }
 
 // ListEngramsResponse returns paginated engrams.
@@ -317,6 +328,18 @@ type SetStateResponse struct {
 	ID      string `json:"id"`
 	State   string `json:"state"`
 	Updated bool   `json:"updated"`
+}
+
+// UpdateTagsRequest is the body for PUT /api/engrams/{id}/tags.
+type UpdateTagsRequest struct {
+	Vault string   `json:"vault,omitempty"`
+	Tags  []string `json:"tags"`
+}
+
+// UpdateTagsResponse is returned by the tags endpoint.
+type UpdateTagsResponse struct {
+	ID   string   `json:"id"`
+	Tags []string `json:"tags"`
 }
 
 // DeletedEngramItem is a soft-deleted engram in list results.

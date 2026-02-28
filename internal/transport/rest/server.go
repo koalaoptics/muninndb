@@ -175,6 +175,7 @@ func NewServer(addr string, engine EngineAPI, authStore *auth.Store, sessionSecr
 	mux.HandleFunc("POST /api/traverse", s.withMiddleware(s.handleTraverse))
 	mux.HandleFunc("POST /api/explain", s.withMiddleware(s.handleExplain))
 	mux.HandleFunc("PUT /api/engrams/{id}/state", s.withMiddleware(s.handleSetState))
+	mux.HandleFunc("PUT /api/engrams/{id}/tags", s.withMiddleware(s.handleUpdateTags))
 	mux.HandleFunc("GET /api/deleted", s.withMiddleware(s.handleListDeleted))
 	mux.HandleFunc("POST /api/engrams/{id}/retry-enrich", s.withMiddleware(s.handleRetryEnrich))
 	mux.HandleFunc("GET /api/contradictions", s.withMiddleware(s.handleContradictions))
@@ -987,16 +988,56 @@ func (s *Server) withClusterAuthMiddleware(next http.HandlerFunc) http.HandlerFu
 }
 
 func (s *Server) handleListEngrams(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
 	vault := ctxVault(r)
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
 	if offset < 0 {
 		offset = 0
 	}
-	resp, err := s.engine.ListEngrams(r.Context(), &ListEngramsRequest{Vault: vault, Limit: limit, Offset: offset})
+
+	sortBy := q.Get("sort") // "created" or "accessed"
+
+	var tags []string
+	if raw := q.Get("tags"); raw != "" {
+		for _, t := range strings.Split(raw, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				tags = append(tags, t)
+			}
+		}
+	}
+
+	state := q.Get("state")
+
+	var minConf, maxConf float64
+	if v := q.Get("min_confidence"); v != "" {
+		minConf, _ = strconv.ParseFloat(v, 32)
+	}
+	if v := q.Get("max_confidence"); v != "" {
+		maxConf, _ = strconv.ParseFloat(v, 32)
+	}
+
+	since := q.Get("since")
+	before := q.Get("before")
+
+	req := &ListEngramsRequest{
+		Vault:   vault,
+		Limit:   limit,
+		Offset:  offset,
+		Sort:    sortBy,
+		Tags:    tags,
+		State:   state,
+		MinConf: float32(minConf),
+		MaxConf: float32(maxConf),
+		Since:   since,
+		Before:  before,
+	}
+
+	resp, err := s.engine.ListEngrams(r.Context(), req)
 	if err != nil {
 		s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, err.Error())
 		return
@@ -1233,6 +1274,34 @@ func (s *Server) handleSetState(w http.ResponseWriter, r *http.Request) {
 		ID:      id,
 		State:   body.State,
 		Updated: true,
+	})
+}
+
+func (s *Server) handleUpdateTags(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, "missing engram id")
+		return
+	}
+	var body UpdateTagsRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, "invalid request body")
+		return
+	}
+	vault := body.Vault
+	if vault == "" {
+		vault = ctxVault(r)
+	}
+	if body.Tags == nil {
+		body.Tags = []string{}
+	}
+	if err := s.engine.UpdateTags(r.Context(), vault, id, body.Tags); err != nil {
+		s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, err.Error())
+		return
+	}
+	s.sendJSON(w, http.StatusOK, UpdateTagsResponse{
+		ID:   id,
+		Tags: body.Tags,
 	})
 }
 

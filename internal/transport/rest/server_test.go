@@ -224,6 +224,10 @@ func (m *MockEngine) UpdateState(ctx context.Context, vault, engramID, state, re
 	return nil
 }
 
+func (m *MockEngine) UpdateTags(ctx context.Context, vault, engramID string, tags []string) error {
+	return nil
+}
+
 func (m *MockEngine) ListDeleted(ctx context.Context, vault string, limit int) (*ListDeletedResponse, error) {
 	return &ListDeletedResponse{
 		Deleted: []DeletedEngramItem{

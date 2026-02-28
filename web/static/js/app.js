@@ -26,6 +26,7 @@ document.addEventListener('alpine:init', () => {
     searchMode: 'balanced',
     page: 0,
     memoriesLoading: false,
+    memoryFilters: { sort: 'created', tags: '', state: '', minConf: 0, maxConf: 0 },
     selectedMemory: null,
     showNewMemoryModal: false,
     newMemoryForm: { concept: '', content: '', tagsRaw: '', confidence: 0.8 },
@@ -36,8 +37,24 @@ document.addEventListener('alpine:init', () => {
     editMemoryForm: { content: '', reason: '' },
     editMemorySaving: false,
 
+    // Tag editing
+    editingTags: false,
+    editTagsValue: '',
+    editTagsSaving: false,
+
     // Link modal
     linkModal: { show: false, sourceId: '', targetId: '', relType: 5, weight: 0.8 },
+
+    // Explain modal
+    explainModal: { show: false, data: null, loading: false },
+
+    // Multi-select / consolidate
+    multiSelectMode: false,
+    selectedMemoryIds: [],
+    consolidateModal: { show: false, mergedContent: '' },
+
+    // Decide modal
+    decideModal: { show: false, decision: '', rationale: '', alternatives: '', evidenceIds: '' },
 
     // Graph
     graphLoaded: false,
@@ -236,6 +253,9 @@ document.addEventListener('alpine:init', () => {
         if (e.key === 'Escape') {
           // Close any open modal/panel
           if (this.showNewMemoryModal)  { this.showNewMemoryModal = false; return; }
+          if (this.explainModal.show)   { this.closeExplainModal(); return; }
+          if (this.consolidateModal.show) { this.consolidateModal.show = false; return; }
+          if (this.decideModal.show)    { this.decideModal.show = false; return; }
           if (this.selectedMemory)      { this.selectedMemory = null; return; }
           if (this.confirmForgetId)     { this.confirmForgetId = null; return; }
           if (this.showSignOutConfirm)  { this.showSignOutConfirm = false; return; }
@@ -645,10 +665,15 @@ document.addEventListener('alpine:init', () => {
       this.memoriesLoading = true;
       try {
         const offset = this.page * 20;
-        const data = await this.apiCall(
-          '/api/engrams?vault=' + encodeURIComponent(this.vault) +
-          '&limit=20&offset=' + offset
-        );
+        let url = '/api/engrams?vault=' + encodeURIComponent(this.vault) +
+          '&limit=20&offset=' + offset;
+        const f = this.memoryFilters;
+        if (f.sort && f.sort !== 'created') url += '&sort=' + encodeURIComponent(f.sort);
+        if (f.tags && f.tags.trim()) url += '&tags=' + encodeURIComponent(f.tags.trim());
+        if (f.state && f.state.trim()) url += '&state=' + encodeURIComponent(f.state.trim());
+        if (f.minConf > 0) url += '&min_confidence=' + f.minConf;
+        if (f.maxConf > 0) url += '&max_confidence=' + f.maxConf;
+        const data = await this.apiCall(url);
         this.memories = data.engrams || [];
         this.totalMemories = data.total || 0;
       } catch (err) {
@@ -818,6 +843,49 @@ document.addEventListener('alpine:init', () => {
         this.addNotification('error', 'Evolve failed: ' + err.message);
       } finally {
         this.editMemorySaving = false;
+      }
+    },
+
+    // ── Tag editing ────────────────────────────────────────────────────────
+    startEditTags() {
+      if (!this.selectedMemory) return;
+      this.editTagsValue = (this.selectedMemory.tags || []).join(', ');
+      this.editingTags = true;
+    },
+
+    cancelEditTags() {
+      this.editingTags = false;
+      this.editTagsValue = '';
+    },
+
+    async saveTags() {
+      if (!this.selectedMemory) return;
+      const tags = this.editTagsValue
+        .split(',')
+        .map(t => t.trim())
+        .filter(Boolean);
+      this.editTagsSaving = true;
+      try {
+        const resp = await this.apiCall(
+          '/api/engrams/' + encodeURIComponent(this.selectedMemory.id) + '/tags',
+          {
+            method: 'PUT',
+            body: JSON.stringify({ vault: this.vault, tags }),
+          }
+        );
+        this.selectedMemory = { ...this.selectedMemory, tags: resp.tags };
+        // Refresh list so tag chips update there too.
+        const idx = this.memories.findIndex(m => m.id === this.selectedMemory.id);
+        if (idx !== -1) {
+          this.memories[idx] = { ...this.memories[idx], tags: resp.tags };
+        }
+        this.editingTags = false;
+        this.editTagsValue = '';
+        this.addNotification('success', 'Tags updated');
+      } catch (err) {
+        this.addNotification('error', 'Tag update failed: ' + err.message);
+      } finally {
+        this.editTagsSaving = false;
       }
     },
 
@@ -2057,6 +2125,119 @@ document.addEventListener('alpine:init', () => {
         this.pluginCfg.ollamaDetected = false;
       }
       this.pluginCfg.ollamaChecking = false;
+    },
+
+    // ── Explain Score ──────────────────────────────────────────────────────
+    async explainScore(engramId) {
+      if (!this.searchQuery.trim()) return;
+      this.explainModal = { show: true, data: null, loading: true };
+      try {
+        const data = await this.apiCall('/api/explain', {
+          method: 'POST',
+          body: JSON.stringify({
+            vault: this.vault,
+            engram_id: engramId,
+            query: [this.searchQuery.trim()],
+          }),
+        });
+        this.explainModal = { show: true, data, loading: false };
+      } catch (err) {
+        this.explainModal = { show: false, data: null, loading: false };
+        this.addNotification('error', 'Explain failed: ' + err.message);
+      }
+    },
+
+    closeExplainModal() {
+      this.explainModal = { show: false, data: null, loading: false };
+    },
+
+    // ── Multi-select / Consolidate ─────────────────────────────────────────
+    toggleMultiSelect() {
+      this.multiSelectMode = !this.multiSelectMode;
+      if (!this.multiSelectMode) {
+        this.selectedMemoryIds = [];
+      }
+    },
+
+    toggleMemorySelection(id) {
+      const idx = this.selectedMemoryIds.indexOf(id);
+      if (idx === -1) {
+        this.selectedMemoryIds.push(id);
+      } else {
+        this.selectedMemoryIds.splice(idx, 1);
+      }
+    },
+
+    openConsolidate() {
+      if (this.selectedMemoryIds.length < 2) {
+        this.addNotification('error', 'Select at least 2 memories to consolidate');
+        return;
+      }
+      // Pre-fill with combined content from selected memories
+      const selected = this.memories.filter(m => this.selectedMemoryIds.includes(m.id));
+      const combined = selected.map(m => (m.concept ? '[' + m.concept + ']\n' : '') + m.content).join('\n\n---\n\n');
+      this.consolidateModal = { show: true, mergedContent: combined };
+    },
+
+    async submitConsolidate() {
+      if (!this.consolidateModal.mergedContent.trim()) {
+        this.addNotification('error', 'Merged content cannot be empty');
+        return;
+      }
+      try {
+        const data = await this.apiCall('/api/consolidate', {
+          method: 'POST',
+          body: JSON.stringify({
+            vault: this.vault,
+            ids: this.selectedMemoryIds,
+            merged_content: this.consolidateModal.mergedContent.trim(),
+          }),
+        });
+        this.consolidateModal = { show: false, mergedContent: '' };
+        this.selectedMemoryIds = [];
+        this.multiSelectMode = false;
+        this.addNotification('success', 'Memories consolidated (new ID: ' + data.id.slice(0, 8) + '…)');
+        await this.loadMemories();
+      } catch (err) {
+        this.addNotification('error', 'Consolidate failed: ' + err.message);
+      }
+    },
+
+    // ── Decide ─────────────────────────────────────────────────────────────
+    openDecideModal() {
+      this.decideModal = { show: true, decision: '', rationale: '', alternatives: '', evidenceIds: '' };
+    },
+
+    async submitDecide() {
+      if (!this.decideModal.decision.trim()) {
+        this.addNotification('error', 'Decision text is required');
+        return;
+      }
+      const alternatives = this.decideModal.alternatives
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean);
+      const evidenceIds = this.decideModal.evidenceIds
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean);
+      try {
+        const data = await this.apiCall('/api/decide', {
+          method: 'POST',
+          body: JSON.stringify({
+            vault: this.vault,
+            decision: this.decideModal.decision.trim(),
+            rationale: this.decideModal.rationale.trim(),
+            alternatives,
+            evidence_ids: evidenceIds,
+          }),
+        });
+        this.decideModal = { show: false, decision: '', rationale: '', alternatives: '', evidenceIds: '' };
+        this.addNotification('success', 'Decision recorded (ID: ' + data.id.slice(0, 8) + '…)');
+        await this.loadMemories();
+      } catch (err) {
+        this.addNotification('error', 'Decide failed: ' + err.message);
+      }
     },
   }));
 });

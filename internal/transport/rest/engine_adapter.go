@@ -115,43 +115,49 @@ func (w *RESTEngineWrapper) Stat(ctx context.Context, req *StatRequest) (*StatRe
 }
 
 func (w *RESTEngineWrapper) ListEngrams(ctx context.Context, req *ListEngramsRequest) (*ListEngramsResponse, error) {
-	maxNeeded := req.Offset + req.Limit
-	if maxNeeded <= 0 {
-		maxNeeded = 20
+	params := engine.ListEngramsParams{
+		Vault:   req.Vault,
+		Limit:   req.Limit,
+		Offset:  req.Offset,
+		Sort:    req.Sort,
+		Tags:    req.Tags,
+		State:   req.State,
+		MinConf: req.MinConf,
+		MaxConf: req.MaxConf,
 	}
-	aReq := &ActivateRequest{
-		Context:    []string{},
-		MaxResults: maxNeeded * 2,
-		Vault:      req.Vault,
-		Threshold:  0.0,
+
+	if req.Since != "" {
+		if t, err := time.Parse(time.RFC3339, req.Since); err == nil {
+			params.Since = t
+		}
 	}
-	resp, err := w.engine.Activate(ctx, aReq)
+	if req.Before != "" {
+		if t, err := time.Parse(time.RFC3339, req.Before); err == nil {
+			params.Before = t
+		}
+	}
+
+	result, err := w.engine.ListEngrams(ctx, params)
 	if err != nil {
 		return nil, err
 	}
-	items := resp.Activations
-	total := len(items)
-	if req.Offset > len(items) {
-		items = nil
-	} else {
-		items = items[req.Offset:]
-	}
-	if req.Limit > 0 && len(items) > req.Limit {
-		items = items[:req.Limit]
-	}
-	engrams := make([]EngramItem, len(items))
-	for i, a := range items {
+
+	engrams := make([]EngramItem, len(result.Engrams))
+	for i, eng := range result.Engrams {
 		engrams[i] = EngramItem{
-			ID:         a.ID,
-			Concept:    a.Concept,
-			Content:    a.Content,
-			Confidence: a.Confidence,
+			ID:         eng.ID.String(),
+			Concept:    eng.Concept,
+			Content:    eng.Content,
+			Confidence: eng.Confidence,
+			Tags:       eng.Tags,
 			Vault:      req.Vault,
+			CreatedAt:  eng.CreatedAt.Unix(),
+			EmbedDim:   uint8(eng.EmbedDim),
 		}
 	}
 	return &ListEngramsResponse{
 		Engrams: engrams,
-		Total:   total,
+		Total:   result.Total,
 		Limit:   req.Limit,
 		Offset:  req.Offset,
 	}, nil
@@ -400,6 +406,15 @@ func (w *RESTEngineWrapper) Explain(ctx context.Context, vault string, req *Expl
 
 func (w *RESTEngineWrapper) UpdateState(ctx context.Context, vault, engramID, state, _ string) error {
 	return w.engine.UpdateLifecycleState(ctx, vault, engramID, state)
+}
+
+func (w *RESTEngineWrapper) UpdateTags(ctx context.Context, vault, engramID string, tags []string) error {
+	ulid, err := storage.ParseULID(engramID)
+	if err != nil {
+		return fmt.Errorf("invalid engram id: %w", err)
+	}
+	ws := w.engine.Store().ResolveVaultPrefix(vault)
+	return w.engine.Store().UpdateTags(ctx, ws, ulid, tags)
 }
 
 func (w *RESTEngineWrapper) ListDeleted(ctx context.Context, vault string, limit int) (*ListDeletedResponse, error) {
