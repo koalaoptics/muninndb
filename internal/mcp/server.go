@@ -219,6 +219,9 @@ func (s *MCPServer) dispatchToolCall(ctx context.Context, w http.ResponseWriter,
 
 		// Entity cluster detection
 		"muninn_entity_clusters": s.handleEntityClusters,
+
+		// Knowledge graph export
+		"muninn_export_graph": s.handleExportGraph,
 	}
 
 	handler, found := handlers[req.Params.Name]

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/scrypster/muninndb/internal/auth"
+	"github.com/scrypster/muninndb/internal/engine"
 	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/transport/mbp"
 	"golang.org/x/text/unicode/norm"
@@ -923,6 +924,43 @@ func (s *MCPServer) handleEntityClusters(ctx context.Context, w http.ResponseWri
 	sendResult(w, id, textContent(mustJSON(map[string]any{
 		"clusters": clusters,
 		"count":    len(clusters),
+	})))
+}
+
+func (s *MCPServer) handleExportGraph(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
+	format := "json-ld"
+	if f, ok := args["format"].(string); ok && f != "" {
+		format = f
+	}
+	if format != "json-ld" && format != "graphml" {
+		sendError(w, id, -32602, "invalid params: 'format' must be 'json-ld' or 'graphml'")
+		return
+	}
+	includeEngrams, _ := args["include_engrams"].(bool)
+
+	g, err := s.engine.ExportGraph(ctx, vault, includeEngrams)
+	if err != nil {
+		sendError(w, id, -32000, "tool error: "+err.Error())
+		return
+	}
+
+	var data string
+	switch format {
+	case "graphml":
+		data, err = engine.FormatGraphGraphML(g)
+	default:
+		data, err = engine.FormatGraphJSONLD(g)
+	}
+	if err != nil {
+		sendError(w, id, -32000, "tool error: format: "+err.Error())
+		return
+	}
+
+	sendResult(w, id, textContent(mustJSON(map[string]any{
+		"format":     format,
+		"data":       data,
+		"node_count": len(g.Nodes),
+		"edge_count": len(g.Edges),
 	})))
 }
 

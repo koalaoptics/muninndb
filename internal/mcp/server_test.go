@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/scrypster/muninndb/internal/auth"
+	"github.com/scrypster/muninndb/internal/engine"
 	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/transport/mbp"
 )
@@ -117,6 +118,9 @@ func (f *fakeEngine) SetEntityState(_ context.Context, _, _, _ string) error {
 func (f *fakeEngine) GetEntityClusters(_ context.Context, _ string, _, _ int) ([]EntityClusterResult, error) {
 	return []EntityClusterResult{}, nil
 }
+func (f *fakeEngine) ExportGraph(_ context.Context, _ string, _ bool) (*engine.ExportGraph, error) {
+	return &engine.ExportGraph{Nodes: []engine.GraphNode{}, Edges: []engine.GraphEdge{}}, nil
+}
 
 func newTestServer() *MCPServer {
 	return New(":0", &fakeEngine{}, "", nil)
@@ -215,8 +219,8 @@ func TestListTools(t *testing.T) {
 	var result map[string]any
 	json.NewDecoder(w.Body).Decode(&result)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 26 {
-		t.Errorf("expected 26 tools, got %d", len(tools))
+	if len(tools) != 27 {
+		t.Errorf("expected 27 tools, got %d", len(tools))
 	}
 }
 

@@ -336,6 +336,39 @@ func (ps *PebbleStore) ScanEntityClusters(ctx context.Context, ws [8]byte, minCo
 	return nil
 }
 
+// ScanRelationships scans all vault-scoped relationship records at the 0x21 prefix.
+// Calls fn for each RelationshipRecord until fn returns a non-nil error or the
+// scan is exhausted.
+func (ps *PebbleStore) ScanRelationships(ctx context.Context, ws [8]byte, fn func(record RelationshipRecord) error) error {
+	prefix := keys.RelationshipPrefix(ws)
+	upperBound := make([]byte, len(prefix))
+	copy(upperBound, prefix)
+	for i := len(upperBound) - 1; i >= 0; i-- {
+		upperBound[i]++
+		if upperBound[i] != 0 {
+			break
+		}
+	}
+
+	iter, err := ps.db.NewIter(&pebble.IterOptions{LowerBound: prefix, UpperBound: upperBound})
+	if err != nil {
+		return fmt.Errorf("scan relationships: iter: %w", err)
+	}
+	defer iter.Close()
+
+	for valid := iter.First(); valid; valid = iter.Next() {
+		val := iter.Value()
+		var rec RelationshipRecord
+		if err := msgpack.Unmarshal(val, &rec); err != nil {
+			continue
+		}
+		if err := fn(rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // UpsertRelationshipRecord writes a vault-scoped relationship record at 0x21.
 func (ps *PebbleStore) UpsertRelationshipRecord(ctx context.Context, ws [8]byte, engramID ULID, record RelationshipRecord) error {
 	record.UpdatedAt = time.Now().UnixNano()

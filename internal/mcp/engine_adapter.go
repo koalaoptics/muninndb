@@ -293,6 +293,10 @@ func (a *mcpEngineAdapter) SetEntityState(ctx context.Context, entityName, state
 	return a.eng.SetEntityState(ctx, entityName, state, mergedInto)
 }
 
+func (a *mcpEngineAdapter) ExportGraph(ctx context.Context, vault string, includeEngrams bool) (*engine.ExportGraph, error) {
+	return a.eng.ExportGraph(ctx, vault, includeEngrams)
+}
+
 func (a *mcpEngineAdapter) GetEntityClusters(ctx context.Context, vault string, minCount, topN int) ([]EntityClusterResult, error) {
 	clusters, err := a.eng.GetEntityClusters(ctx, vault, minCount, topN)
 	if err != nil {

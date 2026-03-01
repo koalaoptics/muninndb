@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/scrypster/muninndb/internal/auth"
+	"github.com/scrypster/muninndb/internal/engine"
 	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/transport/mbp"
 	"github.com/stretchr/testify/require"
@@ -1490,6 +1491,9 @@ func (e *slowIdempotentEngine) SetEntityState(ctx context.Context, entityName, s
 func (e *slowIdempotentEngine) GetEntityClusters(ctx context.Context, vault string, minCount, topN int) ([]EntityClusterResult, error) {
 	return (&fakeEngine{}).GetEntityClusters(ctx, vault, minCount, topN)
 }
+func (e *slowIdempotentEngine) ExportGraph(ctx context.Context, vault string, includeEngrams bool) (*engine.ExportGraph, error) {
+	return (&fakeEngine{}).ExportGraph(ctx, vault, includeEngrams)
+}
 
 // TestHandleRemember_ConcurrentSameOpID verifies that two concurrent
 // muninn_remember calls carrying the same op_id do not produce duplicate
@@ -1735,4 +1739,104 @@ func TestHandleEntityClusters_EmptyResult(t *testing.T) {
 	if len(clusters) != 0 {
 		t.Errorf("expected empty clusters array, got %d entries", len(clusters))
 	}
+}
+
+// ── muninn_export_graph tests ─────────────────────────────────────────────
+
+// exportGraphEngine is a fake engine that returns a configurable ExportGraph result.
+type exportGraphEngine struct {
+	fakeEngine
+	graph *engine.ExportGraph
+	err   error
+}
+
+func (e *exportGraphEngine) ExportGraph(_ context.Context, _ string, _ bool) (*engine.ExportGraph, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+	if e.graph != nil {
+		return e.graph, nil
+	}
+	return &engine.ExportGraph{
+		Nodes: []engine.GraphNode{
+			{ID: "PostgreSQL", Type: "database"},
+			{ID: "Redis", Type: "cache"},
+		},
+		Edges: []engine.GraphEdge{
+			{From: "PostgreSQL", To: "Redis", RelType: "manages", Weight: 0.8},
+		},
+	}, nil
+}
+
+func TestHandleExportGraph_HappyPathJSONLD(t *testing.T) {
+	srv := newTestServerWith(&exportGraphEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_export_graph","arguments":{"vault":"default","format":"json-ld"}}}`
+	w := postRPC(t, srv, body)
+	require.Equal(t, 200, w.Code)
+	resp := decodeResp(t, w.Body.String())
+	inner := extractInnerJSON(t, resp)
+
+	require.Equal(t, "json-ld", inner["format"], "format field should be json-ld")
+
+	data, ok := inner["data"].(string)
+	require.True(t, ok, "data field should be a string")
+	require.NotEmpty(t, data)
+
+	// data should be valid JSON-LD.
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(data), &doc), "data should be valid JSON")
+	_, hasGraph := doc["@graph"]
+	require.True(t, hasGraph, "JSON-LD data should have @graph key")
+
+	nodeCount, _ := inner["node_count"].(float64)
+	require.Equal(t, float64(2), nodeCount)
+	edgeCount, _ := inner["edge_count"].(float64)
+	require.Equal(t, float64(1), edgeCount)
+}
+
+func TestHandleExportGraph_HappyPathGraphML(t *testing.T) {
+	srv := newTestServerWith(&exportGraphEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_export_graph","arguments":{"vault":"default","format":"graphml"}}}`
+	w := postRPC(t, srv, body)
+	require.Equal(t, 200, w.Code)
+	resp := decodeResp(t, w.Body.String())
+	inner := extractInnerJSON(t, resp)
+
+	require.Equal(t, "graphml", inner["format"])
+
+	data, ok := inner["data"].(string)
+	require.True(t, ok, "data field should be a string")
+	require.Contains(t, data, "<graphml", "data should contain GraphML XML")
+	require.Contains(t, data, "PostgreSQL")
+}
+
+func TestHandleExportGraph_InvalidFormat(t *testing.T) {
+	srv := newTestServerWith(&exportGraphEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_export_graph","arguments":{"vault":"default","format":"rdf"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	require.NotNil(t, resp.Error)
+	require.Equal(t, -32602, resp.Error.Code)
+}
+
+func TestHandleExportGraph_DefaultVaultUsed(t *testing.T) {
+	// When vault is omitted, resolveVault defaults to "default"; the call should succeed.
+	srv := newTestServerWith(&exportGraphEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_export_graph","arguments":{}}}`
+	w := postRPC(t, srv, body)
+	require.Equal(t, 200, w.Code)
+	resp := decodeResp(t, w.Body.String())
+	require.Nil(t, resp.Error)
+	inner := extractInnerJSON(t, resp)
+	_, hasFormat := inner["format"]
+	require.True(t, hasFormat, "response should have format field")
+}
+
+func TestHandleExportGraph_EngineError(t *testing.T) {
+	srv := newTestServerWith(&exportGraphEngine{err: fmt.Errorf("storage error")})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_export_graph","arguments":{"vault":"default"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	require.NotNil(t, resp.Error)
+	require.Equal(t, -32000, resp.Error.Code)
 }

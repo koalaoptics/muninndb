@@ -191,6 +191,10 @@ type EngineStore interface {
 	// UpsertRelationshipRecord writes a vault-scoped relationship record.
 	UpsertRelationshipRecord(ctx context.Context, ws [8]byte, engramID ULID, record RelationshipRecord) error
 
+	// ScanRelationships scans all vault-scoped relationship records at the 0x21 prefix.
+	// Calls fn for each RelationshipRecord until fn returns a non-nil error or the scan is exhausted.
+	ScanRelationships(ctx context.Context, ws [8]byte, fn func(record RelationshipRecord) error) error
+
 	// IncrementEntityCoOccurrence increments the co-occurrence count for two entity names
 	// within a vault. Uses the 0x24 index. Pair is stored in canonical (hashA <= hashB) order.
 	IncrementEntityCoOccurrence(ctx context.Context, ws [8]byte, nameA, nameB string) error

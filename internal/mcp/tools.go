@@ -445,6 +445,20 @@ func allToolDefinitions() []ToolDefinition {
 				"required": []string{},
 			},
 		},
+		// Knowledge graph export
+		{
+			Name:        "muninn_export_graph",
+			Description: "Export the entity relationship graph for a vault as JSON-LD or GraphML. Nodes are named entities; edges are typed entity-to-entity relationships extracted from memories. Useful for visualisation, graph analysis, or knowledge-base integration.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"vault":  vaultProp,
+					"format": map[string]any{"type": "string", "enum": []string{"json-ld", "graphml"}, "description": "Output format: 'json-ld' (default) or 'graphml'."},
+					"include_engrams": map[string]any{"type": "boolean", "description": "When true, entity types are enriched from the entity record table (default false)."},
+				},
+				"required": []string{},
+			},
+		},
 		{
 			Name:        "muninn_add_child",
 			Description: "Add a single child node to an existing parent in a tree. Writes the engram and wires the is_part_of association and ordinal key. Use for incremental tree updates without resending the whole tree.",

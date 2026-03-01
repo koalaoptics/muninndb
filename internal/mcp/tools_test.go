@@ -7,8 +7,8 @@ import (
 
 func TestAllToolDefinitionsCount(t *testing.T) {
 	tools := allToolDefinitions()
-	if len(tools) != 26 {
-		t.Errorf("expected 26 tools, got %d", len(tools))
+	if len(tools) != 27 {
+		t.Errorf("expected 27 tools, got %d", len(tools))
 	}
 }
 
@@ -84,6 +84,8 @@ func TestExpectedToolNames(t *testing.T) {
 		"muninn_entity_state",
 		// Entity cluster detection
 		"muninn_entity_clusters",
+		// Knowledge graph export
+		"muninn_export_graph",
 	}
 	for _, name := range expected {
 		if !names[name] {

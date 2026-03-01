@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/scrypster/muninndb/internal/auth"
+	"github.com/scrypster/muninndb/internal/engine"
 	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/transport/mbp"
 )
@@ -104,4 +105,8 @@ type EngineInterface interface {
 	// sorted by count descending. Only pairs with count >= minCount are returned.
 	// Results are capped at topN entries.
 	GetEntityClusters(ctx context.Context, vault string, minCount, topN int) ([]EntityClusterResult, error)
+
+	// ExportGraph builds the entity→relationship graph for vault and returns
+	// the raw graph data. The caller chooses the output format.
+	ExportGraph(ctx context.Context, vault string, includeEngrams bool) (*engine.ExportGraph, error)
 }
