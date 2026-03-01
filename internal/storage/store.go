@@ -28,6 +28,10 @@ type StoreBatch interface {
 	WriteAssociation(ctx context.Context, wsPrefix [8]byte, src, dst ULID, assoc *Association) error
 	// WriteOrdinal queues the ordinal key for (parentID, childID) into the batch.
 	WriteOrdinal(ctx context.Context, wsPrefix [8]byte, parentID, childID ULID, ordinal int32) error
+	// UpdateEngramState queues a state update for an existing engram into the batch.
+	// Reads the current engram from the underlying store, sets its state, and queues
+	// updated 0x01 and 0x02 key writes.
+	UpdateEngramState(ctx context.Context, ws [8]byte, id ULID, newState LifecycleState) error
 	// Commit atomically commits all queued writes.
 	Commit() error
 	// Discard releases the batch without writing anything.

@@ -153,6 +153,42 @@ func (b *pebbleStoreBatch) WriteOrdinal(ctx context.Context, ws [8]byte, parentI
 	return b.batch.Set(key, buf[:], nil)
 }
 
+// UpdateEngramState queues a state update for an existing engram into the batch.
+// Reads the current engram from the underlying store, sets its state, and queues
+// updated 0x01 and 0x02 key writes plus the 0x0B state index transition.
+func (b *pebbleStoreBatch) UpdateEngramState(ctx context.Context, ws [8]byte, id ULID, newState LifecycleState) error {
+	if b.committed {
+		return fmt.Errorf("batch already committed")
+	}
+	eng, err := b.ps.GetEngram(ctx, ws, id)
+	if err != nil {
+		return fmt.Errorf("update state: read engram: %w", err)
+	}
+	if eng == nil {
+		return fmt.Errorf("update state: engram %s not found", id.String())
+	}
+	oldState := eng.State
+	eng.State = newState
+	eng.UpdatedAt = time.Now()
+
+	erfEng := toERFEngram(eng)
+	erfBytes, err := erf.EncodeV2(erfEng)
+	if err != nil {
+		return fmt.Errorf("update state: encode: %w", err)
+	}
+	id16 := [16]byte(id)
+
+	// Transition 0x0B state index: remove old entry, write new entry.
+	b.batch.Delete(keys.StateIndexKey(ws, uint8(oldState), id16), nil)
+	b.batch.Set(keys.StateIndexKey(ws, uint8(newState), id16), []byte{}, nil)
+
+	// Update 0x01 full engram record and 0x02 metadata slice.
+	if err := b.batch.Set(keys.EngramKey(ws, id16), erfBytes, nil); err != nil {
+		return fmt.Errorf("update state: set engram key: %w", err)
+	}
+	return b.batch.Set(keys.MetaKey(ws, id16), erf.MetaKeySlice(erfBytes), nil)
+}
+
 // Commit atomically flushes all queued writes to Pebble and runs post-commit
 // side effects (vault counters, WAL entries, provenance).
 func (b *pebbleStoreBatch) Commit() error {

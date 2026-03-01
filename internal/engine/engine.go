@@ -1865,42 +1865,84 @@ type EngineSessionEntry struct {
 
 // Evolve creates a new version of an existing engram and soft-deletes the old one.
 // It links the new engram to the old one with RelSupersedes and returns the new ID.
+// All three writes (new engram, supersedes association, old engram state) are committed
+// in a single atomic Pebble batch so a crash cannot leave the store in an inconsistent state.
 func (e *Engine) Evolve(ctx context.Context, vault, oldID, newContent, reason string) (storage.ULID, error) {
-	old, err := e.Read(ctx, &mbp.ReadRequest{ID: oldID, Vault: vault})
+	wsPrefix := e.store.ResolveVaultPrefix(vault)
+
+	// Parse the old ULID before any writes.
+	oldULID, err := storage.ParseULID(oldID)
 	if err != nil {
-		return storage.ULID{}, fmt.Errorf("evolve: read old: %w", err)
+		return storage.ULID{}, fmt.Errorf("evolve: parse old id: %w", err)
 	}
 
-	newResp, err := e.Write(ctx, &mbp.WriteRequest{
-		Vault:   vault,
-		Concept: old.Concept + " (evolved)",
-		Content: newContent,
-		Tags:    old.Tags,
-	})
+	// Read the old engram to inherit Concept and Tags.
+	oldEng, err := e.store.GetEngram(ctx, wsPrefix, oldULID)
 	if err != nil {
-		return storage.ULID{}, fmt.Errorf("evolve: write new: %w", err)
+		return storage.ULID{}, fmt.Errorf("evolve: read old engram: %w", err)
+	}
+	if oldEng == nil {
+		return storage.ULID{}, fmt.Errorf("evolve: engram %s not found", oldID)
 	}
 
-	_, err = e.Link(ctx, &mbp.LinkRequest{
-		SourceID: newResp.ID,
-		TargetID: oldID,
-		RelType:  uint16(storage.RelSupersedes),
-		Weight:   1.0,
-		Vault:    vault,
-	})
-	if err != nil {
-		return storage.ULID{}, fmt.Errorf("evolve: link: %w", err)
+	// Build the new engram with a pre-assigned ULID so we can reference it in the
+	// supersedes association within the same batch.
+	newULID := storage.NewULID()
+	now := time.Now()
+	newEng := &storage.Engram{
+		ID:         newULID,
+		Concept:    oldEng.Concept + " (evolved)",
+		Content:    newContent,
+		Tags:       oldEng.Tags,
+		Confidence: 1.0,
+		Stability:  30.0,
+		State:      storage.StateActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		LastAccess: now,
 	}
 
-	_, err = e.Forget(ctx, &mbp.ForgetRequest{ID: oldID, Hard: false, Vault: vault})
-	if err != nil {
-		return storage.ULID{}, fmt.Errorf("evolve: forget old: %w", err)
+	// Build the supersedes association (new → old).
+	supersedes := &storage.Association{
+		TargetID:      oldULID,
+		RelType:       storage.RelSupersedes,
+		Weight:        1.0,
+		Confidence:    1.0,
+		CreatedAt:     now,
+		LastActivated: int32(now.Unix()),
 	}
 
-	newULID, err := storage.ParseULID(newResp.ID)
-	if err != nil {
-		return storage.ULID{}, fmt.Errorf("evolve: parse new id: %w", err)
+	// Single atomic batch: write new engram + supersedes association + soft-delete old engram.
+	batch := e.store.NewBatch()
+	defer batch.Discard()
+
+	if err := batch.WriteEngram(ctx, wsPrefix, newEng); err != nil {
+		return storage.ULID{}, fmt.Errorf("evolve: batch write new engram: %w", err)
 	}
+	if err := batch.WriteAssociation(ctx, wsPrefix, newULID, oldULID, supersedes); err != nil {
+		return storage.ULID{}, fmt.Errorf("evolve: batch write association: %w", err)
+	}
+	if err := batch.UpdateEngramState(ctx, wsPrefix, oldULID, storage.StateSoftDeleted); err != nil {
+		return storage.ULID{}, fmt.Errorf("evolve: batch update old state: %w", err)
+	}
+	if err := batch.Commit(); err != nil {
+		return storage.ULID{}, fmt.Errorf("evolve: batch commit: %w", err)
+	}
+
+	// Persist vault name (idempotent).
+	_ = e.store.WriteVaultName(wsPrefix, vault)
+
+	// Submit new engram to async FTS worker.
+	if e.ftsWorker != nil {
+		e.ftsWorker.Submit(fts.IndexJob{
+			WS:        wsPrefix,
+			ID:        [16]byte(newULID),
+			Concept:   newEng.Concept,
+			CreatedBy: newEng.CreatedBy,
+			Content:   newEng.Content,
+		})
+	}
+
 	return newULID, nil
 }
 
