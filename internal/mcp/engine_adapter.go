@@ -115,7 +115,7 @@ func (a *mcpEngineAdapter) Traverse(ctx context.Context, vault string, req *Trav
 	if maxNodes <= 0 {
 		maxNodes = 50
 	}
-	nodes, edges, err := a.eng.Traverse(ctx, vault, req.StartID, maxHops, maxNodes)
+	nodes, edges, err := a.eng.Traverse(ctx, vault, req.StartID, maxHops, maxNodes, req.FollowEntities)
 	if err != nil {
 		return nil, err
 	}

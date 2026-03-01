@@ -534,11 +534,13 @@ func (s *MCPServer) handleTraverse(ctx context.Context, w http.ResponseWriter, i
 			}
 		}
 	}
+	followEntities, _ := args["follow_entities"].(bool)
 	req := &TraverseRequest{
-		StartID:  startID,
-		MaxHops:  maxHops,
-		MaxNodes: maxNodes,
-		RelTypes: relTypes,
+		StartID:        startID,
+		MaxHops:        maxHops,
+		MaxNodes:       maxNodes,
+		RelTypes:       relTypes,
+		FollowEntities: followEntities,
 	}
 	result, err := s.engine.Traverse(ctx, vault, req)
 	if err != nil {

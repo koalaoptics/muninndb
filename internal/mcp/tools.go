@@ -276,11 +276,12 @@ func allToolDefinitions() []ToolDefinition {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"vault":     vaultProp,
-					"start_id":  map[string]any{"type": "string", "description": "ID of the memory to start from."},
-					"max_hops":  map[string]any{"type": "integer", "description": "Maximum BFS depth from the starting node (default 2, max 5)."},
-					"max_nodes": map[string]any{"type": "integer", "description": "Maximum number of memories to return (default 20, max 100)."},
-					"rel_types": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional: filter to specific relation types (e.g. [\"depends_on\", \"supports\"])."},
+					"vault":           vaultProp,
+					"start_id":        map[string]any{"type": "string", "description": "ID of the memory to start from."},
+					"max_hops":        map[string]any{"type": "integer", "description": "Maximum BFS depth from the starting node (default 2, max 5)."},
+					"max_nodes":       map[string]any{"type": "integer", "description": "Maximum number of memories to return (default 20, max 100)."},
+					"rel_types":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional: filter to specific relation types (e.g. [\"depends_on\", \"supports\"])."},
+					"follow_entities": map[string]any{"type": "boolean", "description": "When true, the BFS also traverses through shared entity links (e.g. two memories that both mention 'PostgreSQL' are connected even without a direct association). Entity-hop edges are assigned a lower weight (0.1) than direct association edges. Default false."},
 				},
 				"required": []string{"start_id"},
 			},

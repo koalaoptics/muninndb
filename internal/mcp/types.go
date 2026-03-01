@@ -122,10 +122,11 @@ type RestoreResult struct {
 
 // TraverseRequest defines parameters for a BFS graph traversal.
 type TraverseRequest struct {
-	StartID  string
-	MaxHops  int
-	MaxNodes int
-	RelTypes []string
+	StartID        string
+	MaxHops        int
+	MaxNodes       int
+	RelTypes       []string
+	FollowEntities bool
 }
 
 // TraverseResult is the output of a BFS graph traversal.
