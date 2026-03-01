@@ -431,6 +431,20 @@ func allToolDefinitions() []ToolDefinition {
 				"required": []string{"root_id"},
 			},
 		},
+		// Entity cluster detection
+		{
+			Name:        "muninn_entity_clusters",
+			Description: "Return entity pairs that frequently co-occur in the same memories. Uses the co-occurrence index for fast O(pairs) lookup. Useful for discovering implicit relationships between entities.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"vault":     vaultProp,
+					"min_count": map[string]any{"type": "integer", "description": "Minimum co-occurrence count to include a pair (default 2)."},
+					"top_n":     map[string]any{"type": "integer", "description": "Maximum number of entity pairs to return, sorted by count descending (default 20)."},
+				},
+				"required": []string{},
+			},
+		},
 		{
 			Name:        "muninn_add_child",
 			Description: "Add a single child node to an existing parent in a tree. Writes the engram and wires the is_part_of association and ordinal key. Use for incremental tree updates without resending the whole tree.",

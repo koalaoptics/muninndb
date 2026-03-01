@@ -452,6 +452,7 @@ func (rp *RetroactiveProcessor) processEngram(ctx context.Context, eng *Engram) 
 
 		// Upsert entities (only if caller didn't provide them)
 		if !hasEntities {
+			var linkedEntityNames []string
 			for _, entity := range result.Entities {
 				if err := rp.store.UpsertEntity(ctx, entity); err != nil {
 					slog.Warn("enrich: failed to upsert entity", "id", eng.ID.String(), "name", entity.Name, "err", err)
@@ -459,6 +460,14 @@ func (rp *RetroactiveProcessor) processEngram(ctx context.Context, eng *Engram) 
 				}
 				if err := rp.store.LinkEngramToEntity(ctx, eng.ID, entity.Name); err != nil {
 					slog.Warn("enrich: failed to link engram to entity", "id", eng.ID.String(), "name", entity.Name, "err", err)
+					continue
+				}
+				linkedEntityNames = append(linkedEntityNames, entity.Name)
+			}
+			// Write co-occurrence pairs for entities co-appearing in this engram.
+			for i := 0; i < len(linkedEntityNames); i++ {
+				for j := i + 1; j < len(linkedEntityNames); j++ {
+					_ = rp.store.IncrementEntityCoOccurrence(ctx, eng.ID, linkedEntityNames[i], linkedEntityNames[j])
 				}
 			}
 		}

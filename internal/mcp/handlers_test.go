@@ -1487,6 +1487,9 @@ func (e *slowIdempotentEngine) FindByEntity(ctx context.Context, vault, entityNa
 func (e *slowIdempotentEngine) SetEntityState(ctx context.Context, entityName, state, mergedInto string) error {
 	return (&fakeEngine{}).SetEntityState(ctx, entityName, state, mergedInto)
 }
+func (e *slowIdempotentEngine) GetEntityClusters(ctx context.Context, vault string, minCount, topN int) ([]EntityClusterResult, error) {
+	return (&fakeEngine{}).GetEntityClusters(ctx, vault, minCount, topN)
+}
 
 // TestHandleRemember_ConcurrentSameOpID verifies that two concurrent
 // muninn_remember calls carrying the same op_id do not produce duplicate
@@ -1644,5 +1647,92 @@ func TestHandleEntityStateMergedWithoutMergedInto(t *testing.T) {
 	}
 	if resp.Error != nil && !strings.Contains(resp.Error.Message, "merged_into") {
 		t.Errorf("expected error message to mention merged_into requirement, got: %q", resp.Error.Message)
+	}
+}
+
+// ── muninn_entity_clusters tests ─────────────────────────────────────────────
+
+// entityClustersEngine returns a fixed set of clusters for testing.
+type entityClustersEngine struct {
+	fakeEngine
+	clusters []EntityClusterResult
+	err      error
+}
+
+func (e *entityClustersEngine) GetEntityClusters(_ context.Context, _ string, _, _ int) ([]EntityClusterResult, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+	return e.clusters, nil
+}
+
+func TestHandleEntityClusters_HappyPath(t *testing.T) {
+	eng := &entityClustersEngine{
+		clusters: []EntityClusterResult{
+			{EntityA: "PostgreSQL", EntityB: "Redis", Count: 5},
+			{EntityA: "Go", EntityB: "PostgreSQL", Count: 3},
+		},
+	}
+	srv := newTestServerWith(eng)
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_entity_clusters","arguments":{"vault":"default","min_count":2,"top_n":10}}}`
+	w := postRPC(t, srv, body)
+	require.Equal(t, 200, w.Code)
+	resp := decodeResp(t, w.Body.String())
+	inner := extractInnerJSON(t, resp)
+
+	clusters, ok := inner["clusters"].([]any)
+	if !ok {
+		t.Fatalf("expected clusters to be an array, got %T", inner["clusters"])
+	}
+	if len(clusters) != 2 {
+		t.Errorf("expected 2 clusters, got %d", len(clusters))
+	}
+
+	count, ok := inner["count"].(float64)
+	if !ok {
+		t.Fatalf("expected count to be a number, got %T", inner["count"])
+	}
+	if int(count) != 2 {
+		t.Errorf("expected count=2, got %v", count)
+	}
+
+	// Verify shape of first cluster.
+	first, ok := clusters[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected cluster[0] to be an object, got %T", clusters[0])
+	}
+	if first["entity_a"] == nil || first["entity_b"] == nil || first["count"] == nil {
+		t.Errorf("cluster entry missing required fields: %v", first)
+	}
+}
+
+func TestHandleEntityClusters_EngineError(t *testing.T) {
+	eng := &entityClustersEngine{
+		err: fmt.Errorf("storage unavailable"),
+	}
+	srv := newTestServerWith(eng)
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_entity_clusters","arguments":{"vault":"default"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error == nil || resp.Error.Code != -32000 {
+		t.Errorf("expected -32000 for engine error, got %v", resp.Error)
+	}
+}
+
+func TestHandleEntityClusters_EmptyResult(t *testing.T) {
+	eng := &entityClustersEngine{clusters: nil}
+	srv := newTestServerWith(eng)
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_entity_clusters","arguments":{"vault":"default"}}}`
+	w := postRPC(t, srv, body)
+	require.Equal(t, 200, w.Code)
+	resp := decodeResp(t, w.Body.String())
+	inner := extractInnerJSON(t, resp)
+
+	clusters, ok := inner["clusters"].([]any)
+	if !ok {
+		t.Fatalf("expected clusters to be an array, got %T", inner["clusters"])
+	}
+	if len(clusters) != 0 {
+		t.Errorf("expected empty clusters array, got %d entries", len(clusters))
 	}
 }

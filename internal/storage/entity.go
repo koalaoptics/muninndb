@@ -230,6 +230,97 @@ func (ps *PebbleStore) ScanEngramEntities(ctx context.Context, ws [8]byte, engra
 	return nil
 }
 
+// coOccurrenceRecord is the msgpack value stored at each 0x24 co-occurrence key.
+type coOccurrenceRecord struct {
+	NameA string `msgpack:"a"`
+	NameB string `msgpack:"b"`
+	Count uint32 `msgpack:"n"`
+}
+
+// IncrementEntityCoOccurrence increments the co-occurrence count for a pair of
+// entity names within a vault. The pair is stored in canonical order
+// (nameHashA <= nameHashB byte-by-byte) so that (A,B) and (B,A) share the same key.
+// On first call the count is initialised to 1; subsequent calls increment by 1.
+func (ps *PebbleStore) IncrementEntityCoOccurrence(ctx context.Context, ws [8]byte, nameA, nameB string) error {
+	hashA := keys.EntityNameHash(nameA)
+	hashB := keys.EntityNameHash(nameB)
+
+	// Canonicalize pair order: ensure hashA <= hashB byte-by-byte.
+	canonA, canonB := nameA, nameB
+	for i := 0; i < 8; i++ {
+		if hashA[i] < hashB[i] {
+			break
+		}
+		if hashA[i] > hashB[i] {
+			// Swap so that the smaller hash comes first.
+			hashA, hashB = hashB, hashA
+			canonA, canonB = nameB, nameA
+			break
+		}
+	}
+
+	key := keys.CoOccurrenceKey(ws, hashA, hashB)
+
+	// Read-before-write: load existing count.
+	existing, err := Get(ps.db, key)
+	if err != nil {
+		return fmt.Errorf("co-occurrence read: %w", err)
+	}
+
+	var rec coOccurrenceRecord
+	if existing != nil {
+		if err := msgpack.Unmarshal(existing, &rec); err != nil {
+			return fmt.Errorf("co-occurrence unmarshal: %w", err)
+		}
+	} else {
+		rec.NameA = canonA
+		rec.NameB = canonB
+	}
+	rec.Count++
+
+	val, err := msgpack.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("co-occurrence marshal: %w", err)
+	}
+	return ps.db.Set(key, val, pebble.NoSync)
+}
+
+// ScanEntityClusters scans the 0x24 co-occurrence index for a vault and calls fn
+// for each pair whose count >= minCount. The pairs are not sorted; callers should
+// sort the results themselves if ordering is required.
+func (ps *PebbleStore) ScanEntityClusters(ctx context.Context, ws [8]byte, minCount int, fn func(nameA, nameB string, count int) error) error {
+	prefix := keys.CoOccurrencePrefix(ws)
+	upperBound := make([]byte, len(prefix))
+	copy(upperBound, prefix)
+	for i := len(upperBound) - 1; i >= 0; i-- {
+		upperBound[i]++
+		if upperBound[i] != 0 {
+			break
+		}
+	}
+
+	iter, err := ps.db.NewIter(&pebble.IterOptions{LowerBound: prefix, UpperBound: upperBound})
+	if err != nil {
+		return fmt.Errorf("scan entity clusters: iter: %w", err)
+	}
+	defer iter.Close()
+
+	for valid := iter.First(); valid; valid = iter.Next() {
+		val := iter.Value()
+		var rec coOccurrenceRecord
+		if err := msgpack.Unmarshal(val, &rec); err != nil {
+			continue
+		}
+		if int(rec.Count) < minCount {
+			continue
+		}
+		if err := fn(rec.NameA, rec.NameB, int(rec.Count)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // UpsertRelationshipRecord writes a vault-scoped relationship record at 0x21.
 func (ps *PebbleStore) UpsertRelationshipRecord(ctx context.Context, ws [8]byte, engramID ULID, record RelationshipRecord) error {
 	record.UpdatedAt = time.Now().UnixNano()

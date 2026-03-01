@@ -99,4 +99,9 @@ type EngineInterface interface {
 	// SetEntityState sets the lifecycle state of a named entity.
 	// For state="merged", mergedInto must be the canonical entity name.
 	SetEntityState(ctx context.Context, entityName, state, mergedInto string) error
+
+	// GetEntityClusters returns entity pairs that frequently co-occur in the same engrams,
+	// sorted by count descending. Only pairs with count >= minCount are returned.
+	// Results are capped at topN entries.
+	GetEntityClusters(ctx context.Context, vault string, minCount, topN int) ([]EntityClusterResult, error)
 }

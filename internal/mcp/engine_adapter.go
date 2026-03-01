@@ -293,6 +293,22 @@ func (a *mcpEngineAdapter) SetEntityState(ctx context.Context, entityName, state
 	return a.eng.SetEntityState(ctx, entityName, state, mergedInto)
 }
 
+func (a *mcpEngineAdapter) GetEntityClusters(ctx context.Context, vault string, minCount, topN int) ([]EntityClusterResult, error) {
+	clusters, err := a.eng.GetEntityClusters(ctx, vault, minCount, topN)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]EntityClusterResult, len(clusters))
+	for i, c := range clusters {
+		result[i] = EntityClusterResult{
+			EntityA: c.EntityA,
+			EntityB: c.EntityB,
+			Count:   c.Count,
+		}
+	}
+	return result, nil
+}
+
 func (a *mcpEngineAdapter) WhereLeftOff(ctx context.Context, vault string, limit int) ([]WhereLeftOffEntry, error) {
 	engrams, err := a.eng.WhereLeftOff(ctx, vault, limit)
 	if err != nil {

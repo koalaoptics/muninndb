@@ -552,6 +552,7 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 	// Store caller-provided inline entities in the entity table (not as KeyPoints).
 	if len(callerEntities) > 0 {
 		ws, _ := e.store.FindVaultPrefix(id)
+		var linkedEntityNames []string
 		for _, ent := range callerEntities {
 			record := storage.EntityRecord{
 				Name:       ent.Name,
@@ -564,6 +565,14 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 			}
 			if err := e.store.WriteEntityEngramLink(ctx, ws, id, ent.Name); err != nil {
 				slog.Warn("engine: failed to link inline entity", "name", ent.Name, "err", err)
+				continue
+			}
+			linkedEntityNames = append(linkedEntityNames, ent.Name)
+		}
+		// Write co-occurrence pairs for entities co-appearing in this engram.
+		for i := 0; i < len(linkedEntityNames); i++ {
+			for j := i + 1; j < len(linkedEntityNames); j++ {
+				_ = e.store.IncrementEntityCoOccurrence(ctx, ws, linkedEntityNames[i], linkedEntityNames[j])
 			}
 		}
 		// Mark entities as caller-provided so the retroactive processor skips extraction.
@@ -888,6 +897,7 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 		// Store caller-provided inline entities in the entity table (not as KeyPoints).
 		if len(p.callerEntities) > 0 {
 			ws, _ := e.store.FindVaultPrefix(id)
+			var linkedEntityNames []string
 			for _, ent := range p.callerEntities {
 				record := storage.EntityRecord{
 					Name:       ent.Name,
@@ -900,6 +910,14 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 				}
 				if err := e.store.WriteEntityEngramLink(ctx, ws, id, ent.Name); err != nil {
 					slog.Warn("engine: batch: failed to link inline entity", "name", ent.Name, "err", err)
+					continue
+				}
+				linkedEntityNames = append(linkedEntityNames, ent.Name)
+			}
+			// Write co-occurrence pairs for entities co-appearing in this engram.
+			for i := 0; i < len(linkedEntityNames); i++ {
+				for j := i + 1; j < len(linkedEntityNames); j++ {
+					_ = e.store.IncrementEntityCoOccurrence(ctx, ws, linkedEntityNames[i], linkedEntityNames[j])
 				}
 			}
 			// Mark entities as caller-provided so the retroactive processor skips extraction.

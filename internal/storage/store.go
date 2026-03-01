@@ -191,6 +191,14 @@ type EngineStore interface {
 	// UpsertRelationshipRecord writes a vault-scoped relationship record.
 	UpsertRelationshipRecord(ctx context.Context, ws [8]byte, engramID ULID, record RelationshipRecord) error
 
+	// IncrementEntityCoOccurrence increments the co-occurrence count for two entity names
+	// within a vault. Uses the 0x24 index. Pair is stored in canonical (hashA <= hashB) order.
+	IncrementEntityCoOccurrence(ctx context.Context, ws [8]byte, nameA, nameB string) error
+
+	// ScanEntityClusters scans the 0x24 co-occurrence index for the given vault and calls
+	// fn for each pair with count >= minCount.
+	ScanEntityClusters(ctx context.Context, ws [8]byte, minCount int, fn func(nameA, nameB string, count int) error) error
+
 	// WriteLastAccessEntry writes/updates the 0x22 LastAccess index entry.
 	// prevMillis is the old LastAccess unix-millis (0 if first write).
 	// newMillis is the new LastAccess unix-millis.

@@ -85,6 +85,10 @@ func (m *mockPluginStore) AutoLinkByEmbedding(_ context.Context, _ ULID, _ []flo
 	return m.autoLinkErr
 }
 
+func (m *mockPluginStore) IncrementEntityCoOccurrence(_ context.Context, _ ULID, _, _ string) error {
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Mock EngramIterator
 // ---------------------------------------------------------------------------

@@ -260,6 +260,13 @@ type WhereLeftOffEntry struct {
 	State      string    `json:"state"`
 }
 
+// EntityClusterResult is one entity co-occurrence pair returned by muninn_entity_clusters.
+type EntityClusterResult struct {
+	EntityA string `json:"entity_a"`
+	EntityB string `json:"entity_b"`
+	Count   int    `json:"count"`
+}
+
 // --- Cognitive push notification param types ---
 // These are pre-serialized to json.RawMessage at emission sites.
 

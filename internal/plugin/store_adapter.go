@@ -71,6 +71,14 @@ func (a *pluginStoreAdapter) LinkEngramToEntity(ctx context.Context, engramID UL
 	return a.store.WriteEntityEngramLink(ctx, ws, storage.ULID(engramID), entityName)
 }
 
+func (a *pluginStoreAdapter) IncrementEntityCoOccurrence(ctx context.Context, engramID ULID, nameA, nameB string) error {
+	ws, ok := a.store.FindVaultPrefix(storage.ULID(engramID))
+	if !ok {
+		return fmt.Errorf("IncrementEntityCoOccurrence: engram %s not found", engramID.String())
+	}
+	return a.store.IncrementEntityCoOccurrence(ctx, ws, nameA, nameB)
+}
+
 func (a *pluginStoreAdapter) UpsertRelationship(ctx context.Context, engramID ULID, rel ExtractedRelation) error {
 	ws, ok := a.store.FindVaultPrefix(storage.ULID(engramID))
 	if !ok {

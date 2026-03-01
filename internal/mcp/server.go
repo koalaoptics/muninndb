@@ -216,6 +216,9 @@ func (s *MCPServer) dispatchToolCall(ctx context.Context, w http.ResponseWriter,
 
 		// Entity lifecycle state
 		"muninn_entity_state": s.handleEntityState,
+
+		// Entity cluster detection
+		"muninn_entity_clusters": s.handleEntityClusters,
 	}
 
 	handler, found := handlers[req.Params.Name]

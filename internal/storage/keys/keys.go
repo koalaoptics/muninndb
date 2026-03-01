@@ -578,6 +578,29 @@ func RelationshipKey(ws [8]byte, engramID [16]byte, fromHash [8]byte, relTypeByt
 	return key
 }
 
+// CoOccurrenceKey constructs the entity co-occurrence index key (0x24 prefix).
+// Tracks how many times two entities appear in the same engram within a vault.
+// Key: 0x24 | wsPrefix(8) | nameHashA(8) | nameHashB(8) = 25 bytes
+// Always stored with nameHashA <= nameHashB (canonical pair order).
+// Value: msgpack(coOccurrenceRecord{NameA, NameB, Count uint32}).
+func CoOccurrenceKey(ws [8]byte, hashA, hashB [8]byte) []byte {
+	key := make([]byte, 1+8+8+8)
+	key[0] = 0x24
+	copy(key[1:9], ws[:])
+	copy(key[9:17], hashA[:])
+	copy(key[17:25], hashB[:])
+	return key
+}
+
+// CoOccurrencePrefix returns the 9-byte scan prefix for all co-occurrence entries
+// in a given vault (0x24 | wsPrefix(8)).
+func CoOccurrencePrefix(ws [8]byte) []byte {
+	key := make([]byte, 1+8)
+	key[0] = 0x24
+	copy(key[1:9], ws[:])
+	return key
+}
+
 // EntityReverseIndexKey constructs the entity→engram reverse index key (0x23 prefix).
 // Enables "which engrams mention entity X?" queries by scanning 0x23|nameHash prefix.
 // Key: 0x23 | nameHash(8) | wsPrefix(8) | engramID(16) = 33 bytes

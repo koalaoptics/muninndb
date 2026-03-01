@@ -896,6 +896,36 @@ func (s *MCPServer) handleAddChild(ctx context.Context, w http.ResponseWriter, i
 	sendResult(w, id, textContent(mustJSON(result)))
 }
 
+func (s *MCPServer) handleEntityClusters(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
+	minCount := 2
+	if v, ok := args["min_count"].(float64); ok {
+		minCount = int(v)
+	}
+	if minCount < 1 {
+		minCount = 1
+	}
+	topN := 20
+	if v, ok := args["top_n"].(float64); ok {
+		topN = int(v)
+	}
+	if topN < 1 {
+		topN = 1
+	}
+
+	clusters, err := s.engine.GetEntityClusters(ctx, vault, minCount, topN)
+	if err != nil {
+		sendError(w, id, -32000, "tool error: "+err.Error())
+		return
+	}
+	if clusters == nil {
+		clusters = []EntityClusterResult{}
+	}
+	sendResult(w, id, textContent(mustJSON(map[string]any{
+		"clusters": clusters,
+		"count":    len(clusters),
+	})))
+}
+
 // applyTypeArgs parses the "type" and "type_label" arguments from an MCP call
 // and sets MemoryType + TypeLabel on the WriteRequest accordingly.
 func applyTypeArgs(args map[string]any, req *mbp.WriteRequest) {
