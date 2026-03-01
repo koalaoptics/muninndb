@@ -138,6 +138,15 @@ func (ps *PebbleStore) getEntityLock(name string) *sync.Mutex {
 	return m.(*sync.Mutex)
 }
 
+// getCoOccurrenceLock returns a per-pair mutex for the given canonical hash pair.
+// hashA and hashB must already be canonicalized (hashA <= hashB).
+func (ps *PebbleStore) getCoOccurrenceLock(hashA, hashB [8]byte) *sync.Mutex {
+	// Create a string key from the two 8-byte hashes (16 bytes total)
+	key := string(hashA[:]) + string(hashB[:])
+	m, _ := ps.coOccurrenceLocks.LoadOrStore(key, &sync.Mutex{})
+	return m.(*sync.Mutex)
+}
+
 // WriteEntityEngramLink writes a vault-scoped engram→entity link at 0x20
 // and the corresponding entity→engram reverse index entry at 0x23.
 // Both writes are committed atomically in a single Pebble batch.
@@ -241,6 +250,7 @@ type coOccurrenceRecord struct {
 // entity names within a vault. The pair is stored in canonical order
 // (nameHashA <= nameHashB byte-by-byte) so that (A,B) and (B,A) share the same key.
 // On first call the count is initialised to 1; subsequent calls increment by 1.
+// Safe for concurrent calls — uses per-pair locking to prevent TOCTOU races.
 func (ps *PebbleStore) IncrementEntityCoOccurrence(ctx context.Context, ws [8]byte, nameA, nameB string) error {
 	hashA := keys.EntityNameHash(nameA)
 	hashB := keys.EntityNameHash(nameB)
@@ -258,6 +268,11 @@ func (ps *PebbleStore) IncrementEntityCoOccurrence(ctx context.Context, ws [8]by
 			break
 		}
 	}
+
+	// Acquire per-pair mutex to prevent concurrent TOCTOU races.
+	mu := ps.getCoOccurrenceLock(hashA, hashB)
+	mu.Lock()
+	defer mu.Unlock()
 
 	key := keys.CoOccurrenceKey(ws, hashA, hashB)
 

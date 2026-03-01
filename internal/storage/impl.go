@@ -69,7 +69,8 @@ type PebbleStore struct {
 	// cold-start loads and periodic flushes.
 	transCache *TransitionCache
 	closeOnce   sync.Once
-	entityLocks sync.Map // key: normalized entity name → *sync.Mutex
+	entityLocks       sync.Map // key: normalized entity name → *sync.Mutex
+	coOccurrenceLocks sync.Map // key: "hashA:hashB" → *sync.Mutex
 }
 
 // assocCacheEntry holds a cached association list.
