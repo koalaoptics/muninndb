@@ -60,6 +60,7 @@ type Engine struct {
 	// Feature subsystems (all optional, nil-safe)
 	autoAssoc      *autoassoc.Worker    // write-time automatic tag-based associations
 	neighborWorker *autoassoc.NeighborWorker // semantic neighbor auto-linking
+	goalLinkWorker *autoassoc.GoalLinkWorker  // goal-aware semantic auto-linking
 	noveltyDet  *novelty.Detector   // write-time near-duplicate detection
 	noveltyJobs chan noveltyJob      // async novelty work queue
 	noveltyDone chan struct{}        // signals novelty worker shutdown
@@ -231,6 +232,7 @@ func NewEngine(
 		embedder:         embedder,
 		autoAssoc:        autoassoc.New(store, ftsIdx),
 		neighborWorker:  autoassoc.NewNeighborWorker(store, hnswRegistry),
+		goalLinkWorker:  autoassoc.NewGoalLinkWorker(store, hnswRegistry),
 		noveltyDet:       novelty.New(),
 		noveltyJobs:      make(chan noveltyJob, 256),
 		noveltyDone:      make(chan struct{}),
@@ -336,6 +338,9 @@ func (e *Engine) Stop() {
 			if e.neighborWorker != nil {
 				e.neighborWorker.Stop()
 			}
+		}
+		if e.goalLinkWorker != nil {
+			e.goalLinkWorker.Stop()
 		}
 		// Wait for the prune worker to exit after stopCancel() signalled it.
 		if e.pruneDone != nil {
@@ -724,6 +729,16 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 		})
 	}
 
+	// Fire goal auto-linking if this is a goal-type engram with an embedding.
+	if e.goalLinkWorker != nil && eng.MemoryType == storage.TypeGoal && len(eng.Embedding) > 0 {
+		goalEmb := append([]float32(nil), eng.Embedding...)
+		e.goalLinkWorker.EnqueueGoalJob(autoassoc.GoalJob{
+			WS:        wsPrefix,
+			ID:        [16]byte(id),
+			Embedding: goalEmb,
+		})
+	}
+
 	// Notify trigger system after the write is committed and counted.
 	// We copy the engram so the trigger worker goroutine has safe read-only access
 	// to the struct after Write() returns and the caller's stack frame is potentially
@@ -1031,6 +1046,16 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 				WS:        p.wsPrefix,
 				ID:        [16]byte(id),
 				Embedding: p.eng.Embedding,
+			})
+		}
+
+		// Fire goal auto-linking if this is a goal-type engram with an embedding.
+		if e.goalLinkWorker != nil && p.eng.MemoryType == storage.TypeGoal && len(p.eng.Embedding) > 0 {
+			goalEmb := append([]float32(nil), p.eng.Embedding...)
+			e.goalLinkWorker.EnqueueGoalJob(autoassoc.GoalJob{
+				WS:        p.wsPrefix,
+				ID:        [16]byte(id),
+				Embedding: goalEmb,
 			})
 		}
 
