@@ -213,6 +213,9 @@ func (s *MCPServer) dispatchToolCall(ctx context.Context, w http.ResponseWriter,
 
 		// Entity reverse index
 		"muninn_find_by_entity": s.handleFindByEntity,
+
+		// Entity lifecycle state
+		"muninn_entity_state": s.handleEntityState,
 	}
 
 	handler, found := handlers[req.Params.Name]

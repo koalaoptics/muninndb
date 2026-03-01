@@ -816,6 +816,31 @@ func (s *MCPServer) handleFindByEntity(ctx context.Context, w http.ResponseWrite
 	sendResult(w, id, textContent(string(out)))
 }
 
+func (s *MCPServer) handleEntityState(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
+	entityName, ok := args["entity_name"].(string)
+	if !ok || entityName == "" {
+		sendError(w, id, -32602, "invalid params: 'entity_name' is required")
+		return
+	}
+	state, ok := args["state"].(string)
+	if !ok || state == "" {
+		sendError(w, id, -32602, "invalid params: 'state' is required")
+		return
+	}
+	mergedInto, _ := args["merged_into"].(string)
+
+	if err := s.engine.SetEntityState(ctx, entityName, state, mergedInto); err != nil {
+		sendError(w, id, -32000, "tool error: "+err.Error())
+		return
+	}
+	out, _ := json.Marshal(map[string]any{
+		"entity": entityName,
+		"state":  state,
+		"ok":     true,
+	})
+	sendResult(w, id, textContent(string(out)))
+}
+
 func (s *MCPServer) handleAddChild(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
 	parentID, ok := args["parent_id"].(string)
 	if !ok || parentID == "" {

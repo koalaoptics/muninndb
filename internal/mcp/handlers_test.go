@@ -1455,6 +1455,9 @@ func (e *slowIdempotentEngine) WhereLeftOff(ctx context.Context, vault string, l
 func (e *slowIdempotentEngine) FindByEntity(ctx context.Context, vault, entityName string, limit int) ([]*storage.Engram, error) {
 	return (&fakeEngine{}).FindByEntity(ctx, vault, entityName, limit)
 }
+func (e *slowIdempotentEngine) SetEntityState(ctx context.Context, entityName, state, mergedInto string) error {
+	return (&fakeEngine{}).SetEntityState(ctx, entityName, state, mergedInto)
+}
 
 // TestHandleRemember_ConcurrentSameOpID verifies that two concurrent
 // muninn_remember calls carrying the same op_id do not produce duplicate
@@ -1502,5 +1505,89 @@ func TestHandleRemember_ConcurrentSameOpID(t *testing.T) {
 	// hit the receipt cache inside the lock.
 	if calls := atomic.LoadInt32(&eng.writeCalls); calls != 1 {
 		t.Errorf("expected exactly 1 Write call, got %d — duplicate engrams were created", calls)
+	}
+}
+
+// ── muninn_entity_state ──────────────────────────────────────────────────────
+
+// entityStateEngine is a minimal engine stub for muninn_entity_state tests.
+type entityStateEngine struct{ fakeEngine }
+
+func (e *entityStateEngine) SetEntityState(_ context.Context, name, state, mergedInto string) error {
+	if name == "" {
+		return fmt.Errorf("entity_name is required")
+	}
+	return nil
+}
+
+// entityStateErrEngine returns an error from SetEntityState.
+type entityStateErrEngine struct{ fakeEngine }
+
+func (e *entityStateErrEngine) SetEntityState(_ context.Context, _, _, _ string) error {
+	return fmt.Errorf("entity %q not found", "PostgreSQL")
+}
+
+func TestHandleEntityStateHappyPath(t *testing.T) {
+	srv := newTestServerWith(&entityStateEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_entity_state","arguments":{"vault":"default","entity_name":"PostgreSQL","state":"deprecated"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	content := extractInnerJSON(t, resp)
+	for _, field := range []string{"entity", "state", "ok"} {
+		if _, ok := content[field]; !ok {
+			t.Errorf("response missing field: %q", field)
+		}
+	}
+	if content["entity"] != "PostgreSQL" {
+		t.Errorf("entity = %v, want PostgreSQL", content["entity"])
+	}
+	if content["state"] != "deprecated" {
+		t.Errorf("state = %v, want deprecated", content["state"])
+	}
+	if ok, _ := content["ok"].(bool); !ok {
+		t.Errorf("ok field should be true, got %v", content["ok"])
+	}
+}
+
+func TestHandleEntityStateMissingEntityName(t *testing.T) {
+	srv := newTestServerWith(&entityStateEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_entity_state","arguments":{"vault":"default","state":"deprecated"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error == nil || resp.Error.Code != -32602 {
+		t.Errorf("expected -32602 for missing entity_name, got %v", resp.Error)
+	}
+}
+
+func TestHandleEntityStateMissingState(t *testing.T) {
+	srv := newTestServerWith(&entityStateEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_entity_state","arguments":{"vault":"default","entity_name":"PostgreSQL"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error == nil || resp.Error.Code != -32602 {
+		t.Errorf("expected -32602 for missing state, got %v", resp.Error)
+	}
+}
+
+func TestHandleEntityStateWithMergedInto(t *testing.T) {
+	srv := newTestServerWith(&entityStateEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_entity_state","arguments":{"vault":"default","entity_name":"Postgres","state":"merged","merged_into":"PostgreSQL"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error for merged state: %v", resp.Error)
+	}
+}
+
+func TestHandleEntityStateEngineError(t *testing.T) {
+	srv := newTestServerWith(&entityStateErrEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_entity_state","arguments":{"vault":"default","entity_name":"PostgreSQL","state":"deprecated"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error == nil || resp.Error.Code != -32000 {
+		t.Errorf("expected -32000 for engine error, got %v", resp.Error)
 	}
 }

@@ -376,6 +376,21 @@ func allToolDefinitions() []ToolDefinition {
 				"required": []string{"entity_name"},
 			},
 		},
+		// Entity lifecycle state tool
+		{
+			Name:        "muninn_entity_state",
+			Description: "Set the lifecycle state of a named entity (active, deprecated, merged, resolved). For state=merged, provide merged_into with the canonical entity name.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"entity_name": map[string]any{"type": "string", "description": "The entity name to update"},
+					"state":       map[string]any{"type": "string", "description": "New state: active, deprecated, merged, or resolved"},
+					"merged_into": map[string]any{"type": "string", "description": "Canonical entity name (required when state=merged)"},
+					"vault":       vaultProp,
+				},
+				"required": []string{"entity_name", "state"},
+			},
+		},
 		// Hierarchical memory tools
 		{
 			Name:        "muninn_remember_tree",

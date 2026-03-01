@@ -7,8 +7,8 @@ import (
 
 func TestAllToolDefinitionsCount(t *testing.T) {
 	tools := allToolDefinitions()
-	if len(tools) != 24 {
-		t.Errorf("expected 24 tools, got %d", len(tools))
+	if len(tools) != 25 {
+		t.Errorf("expected 25 tools, got %d", len(tools))
 	}
 }
 
@@ -80,6 +80,8 @@ func TestExpectedToolNames(t *testing.T) {
 		"muninn_where_left_off",
 		// Entity reverse index
 		"muninn_find_by_entity",
+		// Entity lifecycle state
+		"muninn_entity_state",
 	}
 	for _, name := range expected {
 		if !names[name] {

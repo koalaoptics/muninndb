@@ -111,6 +111,9 @@ func (f *fakeEngine) CheckIdempotency(_ context.Context, _ string) (*storage.Ide
 func (f *fakeEngine) WriteIdempotency(_ context.Context, _, _ string) error {
 	return nil
 }
+func (f *fakeEngine) SetEntityState(_ context.Context, _, _, _ string) error {
+	return nil
+}
 
 func newTestServer() *MCPServer {
 	return New(":0", &fakeEngine{}, "", nil)
@@ -209,8 +212,8 @@ func TestListTools(t *testing.T) {
 	var result map[string]any
 	json.NewDecoder(w.Body).Decode(&result)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 24 {
-		t.Errorf("expected 24 tools, got %d", len(tools))
+	if len(tools) != 25 {
+		t.Errorf("expected 25 tools, got %d", len(tools))
 	}
 }
 
