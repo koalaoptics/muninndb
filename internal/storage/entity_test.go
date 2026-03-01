@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -106,4 +107,47 @@ func TestUpsertEntityRecord_UpdatePreservesName(t *testing.T) {
 	require.Equal(t, "database", got.Type)
 	require.Equal(t, "plugin:enrich", got.Source)
 	require.InDelta(t, 0.95, got.Confidence, 0.001)
+}
+
+func TestUpsertEntityRecord_KeepsHigherConfidence(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Write initial record with high confidence.
+	err := store.UpsertEntityRecord(ctx, EntityRecord{
+		Name: "PostgreSQL", Type: "technology", Confidence: 0.9,
+	}, "plugin:enrich")
+	require.NoError(t, err)
+
+	// Upsert with lower confidence — existing confidence must be preserved.
+	err = store.UpsertEntityRecord(ctx, EntityRecord{
+		Name: "PostgreSQL", Type: "technology", Confidence: 0.4,
+	}, "inline")
+	require.NoError(t, err)
+
+	got, err := store.GetEntityRecord(ctx, "PostgreSQL")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.InDelta(t, float32(0.9), got.Confidence, 0.001, "higher confidence must be preserved")
+}
+
+func TestUpsertEntityRecord_UpdatesWhenHigherConfidence(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	err := store.UpsertEntityRecord(ctx, EntityRecord{
+		Name: "PostgreSQL", Type: "technology", Confidence: 0.4,
+	}, "inline")
+	require.NoError(t, err)
+
+	// Upsert with higher confidence — should update.
+	err = store.UpsertEntityRecord(ctx, EntityRecord{
+		Name: "PostgreSQL", Type: "technology", Confidence: 0.9,
+	}, "plugin:enrich")
+	require.NoError(t, err)
+
+	got, err := store.GetEntityRecord(ctx, "PostgreSQL")
+	require.NoError(t, err)
+	assert.InDelta(t, float32(0.9), got.Confidence, 0.001, "higher confidence must be accepted")
+	assert.Equal(t, "plugin:enrich", got.Source)
 }

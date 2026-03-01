@@ -33,15 +33,27 @@ type RelationshipRecord struct {
 }
 
 // UpsertEntityRecord stores or updates a global entity record at 0x1F|nameHash.
+// Applies confidence-preserving merge: if an existing record has higher confidence,
+// the existing confidence is preserved (last-writer-wins on all other fields).
 func (ps *PebbleStore) UpsertEntityRecord(ctx context.Context, record EntityRecord, source string) error {
 	nameHash := keys.EntityNameHash(record.Name)
+	key := keys.EntityKey(nameHash)
+
+	// Read existing record for confidence-preserving merge.
+	existing, err := ps.GetEntityRecord(ctx, record.Name)
+	if err != nil {
+		return fmt.Errorf("entity record read-before-write: %w", err)
+	}
+	if existing != nil && existing.Confidence > record.Confidence {
+		record.Confidence = existing.Confidence
+	}
+
 	record.Source = source
 	record.UpdatedAt = time.Now().UnixNano()
 	val, err := msgpack.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("entity record marshal: %w", err)
 	}
-	key := keys.EntityKey(nameHash)
 	return ps.db.Set(key, val, pebble.NoSync)
 }
 
