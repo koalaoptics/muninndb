@@ -1512,6 +1512,12 @@ func (e *slowIdempotentEngine) GetProvenance(ctx context.Context, vault, id stri
 func (e *slowIdempotentEngine) RecordFeedback(ctx context.Context, vault, engramID string, useful bool) error {
 	return (&fakeEngine{}).RecordFeedback(ctx, vault, engramID, useful)
 }
+func (e *slowIdempotentEngine) GetEntityAggregate(ctx context.Context, vault, entityName string, limit int) (*EntityAggregate, error) {
+	return (&fakeEngine{}).GetEntityAggregate(ctx, vault, entityName, limit)
+}
+func (e *slowIdempotentEngine) ListEntities(ctx context.Context, vault string, limit int, state string) ([]EntitySummary, error) {
+	return (&fakeEngine{}).ListEntities(ctx, vault, limit, state)
+}
 
 // TestHandleRemember_ConcurrentSameOpID verifies that two concurrent
 // muninn_remember calls carrying the same op_id do not produce duplicate

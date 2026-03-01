@@ -306,3 +306,49 @@ type ProvenanceResult struct {
 	ID      string            `json:"id"`
 	Entries []ProvenanceEntry `json:"entries"`
 }
+
+// EntityEngramSummary is a brief projection of an engram mentioning an entity.
+type EntityEngramSummary struct {
+	ID        string `json:"id"`
+	Concept   string `json:"concept"`
+	CreatedAt string `json:"created_at"` // RFC3339
+}
+
+// EntityRelSummary is one relationship involving an entity.
+type EntityRelSummary struct {
+	FromEntity string  `json:"from_entity"`
+	ToEntity   string  `json:"to_entity"`
+	RelType    string  `json:"rel_type"`
+	Weight     float32 `json:"weight"`
+}
+
+// EntityCoOccurrence is a co-occurring entity with its count.
+type EntityCoOccurrence struct {
+	EntityName string `json:"entity_name"`
+	Count      int    `json:"count"`
+}
+
+// EntityAggregate is the full aggregate view returned by muninn_entity.
+type EntityAggregate struct {
+	Name          string                `json:"name"`
+	Type          string                `json:"type"`
+	Confidence    float32               `json:"confidence"`
+	State         string                `json:"state"`
+	MentionCount  int32                 `json:"mention_count"`
+	FirstSeen     string                `json:"first_seen,omitempty"`  // RFC3339
+	UpdatedAt     string                `json:"updated_at,omitempty"`  // RFC3339
+	MergedInto    string                `json:"merged_into,omitempty"`
+	Engrams       []EntityEngramSummary `json:"engrams"`
+	Relationships []EntityRelSummary    `json:"relationships"`
+	CoOccurring   []EntityCoOccurrence  `json:"co_occurring"`
+}
+
+// EntitySummary is a lightweight entity record for muninn_entities list view.
+type EntitySummary struct {
+	Name         string  `json:"name"`
+	Type         string  `json:"type"`
+	Confidence   float32 `json:"confidence"`
+	State        string  `json:"state"`
+	MentionCount int32   `json:"mention_count"`
+	FirstSeen    string  `json:"first_seen,omitempty"` // RFC3339
+}

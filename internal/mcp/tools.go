@@ -570,6 +570,33 @@ func allToolDefinitions() []ToolDefinition {
 			"required": []string{"engram_id"},
 		},
 	},
+	// Entity aggregate view
+	{
+		Name:        "muninn_entity",
+		Description: "Returns the full aggregate view for a named entity: metadata, engrams mentioning it, relationships, and co-occurring entities.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vault": vaultProp,
+				"name":  map[string]any{"type": "string", "description": "Entity name (case-insensitive)"},
+				"limit": map[string]any{"type": "integer", "description": "Max engrams to include (default 20)"},
+			},
+			"required": []string{"name"},
+		},
+	},
+	{
+		Name:        "muninn_entities",
+		Description: "Lists all known entities in a vault, sorted by mention count. Optionally filter by state (active, deprecated, merged, resolved).",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vault": vaultProp,
+				"limit": map[string]any{"type": "integer", "description": "Max results (default 50)"},
+				"state": map[string]any{"type": "string", "description": "Filter by state: active, deprecated, merged, resolved"},
+			},
+			"required": []string{},
+		},
+	},
 	}
 }
 

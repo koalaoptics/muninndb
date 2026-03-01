@@ -395,6 +395,80 @@ func (a *mcpEngineAdapter) GetProvenance(ctx context.Context, vault, id string) 
 	return result, nil
 }
 
+func (a *mcpEngineAdapter) GetEntityAggregate(ctx context.Context, vault, entityName string, limit int) (*EntityAggregate, error) {
+	agg, err := a.eng.GetEntityAggregate(ctx, vault, entityName, limit)
+	if err != nil {
+		return nil, err
+	}
+	if agg == nil {
+		return nil, nil
+	}
+	rec := agg.Record
+
+	engSummaries := make([]EntityEngramSummary, len(agg.Engrams))
+	for i, e := range agg.Engrams {
+		engSummaries[i] = EntityEngramSummary{
+			ID:        e.ID.String(),
+			Concept:   e.Concept,
+			CreatedAt: e.CreatedAt.UTC().Format(time.RFC3339),
+		}
+	}
+	relSummaries := make([]EntityRelSummary, len(agg.Relations))
+	for i, r := range agg.Relations {
+		relSummaries[i] = EntityRelSummary{
+			FromEntity: r.FromEntity,
+			ToEntity:   r.ToEntity,
+			RelType:    r.RelType,
+			Weight:     r.Weight,
+		}
+	}
+	coOcc := make([]EntityCoOccurrence, len(agg.CoOccurring))
+	for i, c := range agg.CoOccurring {
+		coOcc[i] = EntityCoOccurrence{EntityName: c.Name, Count: c.Count}
+	}
+
+	result := &EntityAggregate{
+		Name:          rec.Name,
+		Type:          rec.Type,
+		Confidence:    rec.Confidence,
+		State:         rec.State,
+		MentionCount:  rec.MentionCount,
+		MergedInto:    rec.MergedInto,
+		Engrams:       engSummaries,
+		Relationships: relSummaries,
+		CoOccurring:   coOcc,
+	}
+	if rec.FirstSeen > 0 {
+		result.FirstSeen = time.Unix(0, rec.FirstSeen).UTC().Format(time.RFC3339)
+	}
+	if rec.UpdatedAt > 0 {
+		result.UpdatedAt = time.Unix(0, rec.UpdatedAt).UTC().Format(time.RFC3339)
+	}
+	return result, nil
+}
+
+func (a *mcpEngineAdapter) ListEntities(ctx context.Context, vault string, limit int, state string) ([]EntitySummary, error) {
+	records, err := a.eng.ListEntities(ctx, vault, limit, state)
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]EntitySummary, len(records))
+	for i, r := range records {
+		s := EntitySummary{
+			Name:         r.Name,
+			Type:         r.Type,
+			Confidence:   r.Confidence,
+			State:        r.State,
+			MentionCount: r.MentionCount,
+		}
+		if r.FirstSeen > 0 {
+			s.FirstSeen = time.Unix(0, r.FirstSeen).UTC().Format(time.RFC3339)
+		}
+		summaries[i] = s
+	}
+	return summaries, nil
+}
+
 // provenanceSourceString converts a provenance.SourceType to its string label.
 func provenanceSourceString(s provenance.SourceType) string {
 	switch s {

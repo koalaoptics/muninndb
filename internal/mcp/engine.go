@@ -138,4 +138,13 @@ type EngineInterface interface {
 	// useful=false means the engram was retrieved but was not helpful.
 	// The engine computes the ScoreVector internally.
 	RecordFeedback(ctx context.Context, vault, engramID string, useful bool) error
+
+	// GetEntityAggregate returns the full aggregate view for a named entity.
+	// limit caps engrams returned (0 = default 20).
+	GetEntityAggregate(ctx context.Context, vault, entityName string, limit int) (*EntityAggregate, error)
+
+	// ListEntities returns EntitySummary records sorted by mention_count desc.
+	// state filters by lifecycle state ("active", "deprecated", "merged", "resolved", "" = all).
+	// limit caps results (0 = default 50).
+	ListEntities(ctx context.Context, vault string, limit int, state string) ([]EntitySummary, error)
 }

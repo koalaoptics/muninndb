@@ -7,8 +7,8 @@ import (
 
 func TestAllToolDefinitionsCount(t *testing.T) {
 	tools := allToolDefinitions()
-	if len(tools) != 33 {
-		t.Errorf("expected 33 tools, got %d", len(tools))
+	if len(tools) != 35 {
+		t.Errorf("expected 35 tools, got %d", len(tools))
 	}
 }
 
@@ -97,6 +97,9 @@ func TestExpectedToolNames(t *testing.T) {
 		"muninn_provenance",
 		// SGD learning loop feedback
 		"muninn_feedback",
+		// Entity aggregate view
+		"muninn_entity",
+		"muninn_entities",
 	}
 	for _, name := range expected {
 		if !names[name] {

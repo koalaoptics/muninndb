@@ -238,6 +238,10 @@ func (s *MCPServer) dispatchToolCall(ctx context.Context, w http.ResponseWriter,
 
 		// SGD learning loop feedback
 		"muninn_feedback": s.handleFeedback,
+
+		// Entity aggregate view
+		"muninn_entity":   s.handleEntity,
+		"muninn_entities": s.handleEntities,
 	}
 
 	handler, found := handlers[req.Params.Name]

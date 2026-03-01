@@ -147,6 +147,17 @@ func (f *fakeEngine) RecordFeedback(_ context.Context, _, _ string, _ bool) erro
 	return nil
 }
 
+func (f *fakeEngine) GetEntityAggregate(_ context.Context, _, _ string, _ int) (*EntityAggregate, error) {
+	return &EntityAggregate{
+		Name: "test", Type: "person", Confidence: 1.0, MentionCount: 1, State: "active",
+		Engrams: []EntityEngramSummary{}, Relationships: []EntityRelSummary{}, CoOccurring: []EntityCoOccurrence{},
+	}, nil
+}
+
+func (f *fakeEngine) ListEntities(_ context.Context, _ string, _ int, _ string) ([]EntitySummary, error) {
+	return []EntitySummary{}, nil
+}
+
 func newTestServer() *MCPServer {
 	return New(":0", &fakeEngine{}, "", nil)
 }
@@ -244,8 +255,8 @@ func TestListTools(t *testing.T) {
 	var result map[string]any
 	json.NewDecoder(w.Body).Decode(&result)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 33 {
-		t.Errorf("expected 33 tools, got %d", len(tools))
+	if len(tools) != 35 {
+		t.Errorf("expected 35 tools, got %d", len(tools))
 	}
 }
 

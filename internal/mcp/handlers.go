@@ -1237,6 +1237,42 @@ func (s *MCPServer) handleFeedback(ctx context.Context, w http.ResponseWriter, i
 	sendResult(w, id, textContent(mustJSON(map[string]any{"ok": true, "engram_id": engramID, "useful": useful})))
 }
 
+func (s *MCPServer) handleEntity(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
+	name, _ := args["name"].(string)
+	if name == "" {
+		sendError(w, id, -32602, "name is required")
+		return
+	}
+	limit := 20
+	if v, ok := args["limit"].(float64); ok && v > 0 {
+		limit = int(v)
+	}
+	agg, err := s.engine.GetEntityAggregate(ctx, vault, name, limit)
+	if err != nil {
+		sendError(w, id, -32000, "tool error: "+err.Error())
+		return
+	}
+	if agg == nil {
+		sendError(w, id, -32602, "entity not found: "+name)
+		return
+	}
+	sendResult(w, id, textContent(mustJSON(agg)))
+}
+
+func (s *MCPServer) handleEntities(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
+	limit := 50
+	if v, ok := args["limit"].(float64); ok && v > 0 {
+		limit = int(v)
+	}
+	state, _ := args["state"].(string)
+	summaries, err := s.engine.ListEntities(ctx, vault, limit, state)
+	if err != nil {
+		sendError(w, id, -32000, "tool error: "+err.Error())
+		return
+	}
+	sendResult(w, id, textContent(mustJSON(map[string]any{"entities": summaries, "count": len(summaries)})))
+}
+
 func (s *MCPServer) handleEntityTimeline(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
 	entityName, ok := args["entity_name"].(string)
 	if !ok || entityName == "" {
