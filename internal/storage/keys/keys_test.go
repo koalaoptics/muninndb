@@ -95,6 +95,56 @@ func TestTransitionKey(t *testing.T) {
 	}
 }
 
+func TestOrdinalKey(t *testing.T) {
+	ws := [8]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+	parent := [16]byte{0x10}
+	child := [16]byte{0x20}
+	key := OrdinalKey(ws, parent, child)
+	if len(key) != 41 {
+		t.Fatalf("OrdinalKey length: got %d, want 41", len(key))
+	}
+	if key[0] != 0x1E {
+		t.Fatalf("OrdinalKey prefix: got 0x%02X, want 0x1E", key[0])
+	}
+	for i, b := range ws {
+		if key[1+i] != b {
+			t.Fatalf("OrdinalKey wsPrefix byte %d: got 0x%02X, want 0x%02X", i, key[1+i], b)
+		}
+	}
+	for i, b := range parent {
+		if key[9+i] != b {
+			t.Fatalf("OrdinalKey parentID byte %d: got 0x%02X, want 0x%02X", i, key[9+i], b)
+		}
+	}
+	for i, b := range child {
+		if key[25+i] != b {
+			t.Fatalf("OrdinalKey childID byte %d: got 0x%02X, want 0x%02X", i, key[25+i], b)
+		}
+	}
+}
+
+func TestOrdinalPrefixForParent(t *testing.T) {
+	ws := [8]byte{0x01}
+	parent := [16]byte{0x10}
+	prefix := OrdinalPrefixForParent(ws, parent)
+	if len(prefix) != 25 {
+		t.Fatalf("OrdinalPrefixForParent length: got %d, want 25", len(prefix))
+	}
+	if prefix[0] != 0x1E {
+		t.Fatalf("prefix byte: got 0x%02X, want 0x1E", prefix[0])
+	}
+	for i, b := range ws {
+		if prefix[1+i] != b {
+			t.Fatalf("wsPrefix byte %d: got 0x%02X, want 0x%02X", i, prefix[1+i], b)
+		}
+	}
+	for i, b := range parent {
+		if prefix[9+i] != b {
+			t.Fatalf("parentID byte %d: got 0x%02X, want 0x%02X", i, prefix[9+i], b)
+		}
+	}
+}
+
 func TestEmbeddingKey(t *testing.T) {
 	var ws [8]byte
 	var id [16]byte

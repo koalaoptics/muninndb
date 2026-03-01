@@ -467,6 +467,29 @@ func EmbedModelKey(ws [8]byte) []byte {
 	return key
 }
 
+// OrdinalKey constructs the ordinal index key (0x1E prefix).
+// Stores the sibling position (ordinal) of childID within parentID.
+// Key: 0x1E | wsPrefix(8) | parentID(16) | childID(16) = 41 bytes
+func OrdinalKey(ws [8]byte, parentID [16]byte, childID [16]byte) []byte {
+	key := make([]byte, 1+8+16+16)
+	key[0] = 0x1E
+	copy(key[1:9], ws[:])
+	copy(key[9:25], parentID[:])
+	copy(key[25:41], childID[:])
+	return key
+}
+
+// OrdinalPrefixForParent returns a 25-byte scan prefix covering all child ordinals
+// under a given parent engram (0x1E | ws(8) | parentID(16)).
+// Used by ListChildOrdinals to scan all children of a parent.
+func OrdinalPrefixForParent(ws [8]byte, parentID [16]byte) []byte {
+	key := make([]byte, 1+8+16)
+	key[0] = 0x1E
+	copy(key[1:9], ws[:])
+	copy(key[9:25], parentID[:])
+	return key
+}
+
 // IncrementWSPrefix returns the next workspace prefix for use as an exclusive
 // upper bound in Pebble range operations.
 func IncrementWSPrefix(ws [8]byte) ([8]byte, error) {
