@@ -471,6 +471,105 @@ func TestDedup_ThreeWayCluster(t *testing.T) {
 	}
 }
 
+func TestDedup_ArchivesCorrectEngrams(t *testing.T) {
+	store, db, cleanup := testStoreWithDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	vault := "dedup_correct_archive"
+	wsPrefix := store.ResolveVaultPrefix(vault)
+
+	// Cluster 1: embeddings along x-axis (cosine = 1.0 — identical direction)
+	// Engram A: HIGH score (winner — stays ACTIVE)
+	engAID := writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+		Concept: "a", Content: "content A", Confidence: 0.9, Relevance: 0.9,
+		Stability: 30, Embedding: []float32{1, 0, 0, 0},
+	})
+	// Engram B: LOW score (loser — should be ARCHIVED)
+	engBID := writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+		Concept: "b", Content: "content B", Confidence: 0.3, Relevance: 0.3,
+		Stability: 30, Embedding: []float32{1, 0, 0, 0},
+	})
+
+	// Cluster 2: embeddings along y-axis (cosine = 1.0 — identical direction)
+	// Engram C: HIGH score (winner — stays ACTIVE)
+	engCID := writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+		Concept: "c", Content: "content C", Confidence: 0.8, Relevance: 0.8,
+		Stability: 30, Embedding: []float32{0, 1, 0, 0},
+	})
+	// Engram D: LOW score (loser — should be ARCHIVED)
+	engDID := writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+		Concept: "d", Content: "content D", Confidence: 0.2, Relevance: 0.2,
+		Stability: 30, Embedding: []float32{0, 1, 0, 0},
+	})
+
+	// Engram E: unique embedding along z-axis (orthogonal to both clusters — stays ACTIVE)
+	engEID := writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+		Concept: "e", Content: "content E", Confidence: 0.7, Relevance: 0.7,
+		Stability: 30, Embedding: []float32{0, 0, 1, 0},
+	})
+
+	mock := &mockEngineInterface{store: store}
+	w := &Worker{Engine: mock, MaxDedup: 100, MaxTransitive: 1000, DryRun: false}
+	report := &ConsolidationReport{}
+
+	if err := w.runPhase2Dedup(ctx, store, wsPrefix, report, vault); err != nil {
+		t.Fatal(err)
+	}
+
+	if report.DedupClusters != 2 {
+		t.Errorf("DedupClusters = %d, want 2 (cluster A+B, cluster C+D)", report.DedupClusters)
+	}
+	if report.MergedEngrams != 2 {
+		t.Errorf("MergedEngrams = %d, want 2 (B and D get archived)", report.MergedEngrams)
+	}
+
+	// Engram A: representative of cluster 1 — must remain ACTIVE
+	engA, err := store.GetEngram(ctx, wsPrefix, engAID)
+	if err != nil {
+		t.Fatalf("GetEngram A: %v", err)
+	}
+	if engA.State == storage.StateArchived {
+		t.Error("engram A (high-score, cluster 1 representative) should not be archived")
+	}
+
+	// Engram B: non-representative of cluster 1 — must be ARCHIVED
+	engB, err := store.GetEngram(ctx, wsPrefix, engBID)
+	if err != nil {
+		t.Fatalf("GetEngram B: %v", err)
+	}
+	if engB.State != storage.StateArchived {
+		t.Errorf("engram B (low-score, cluster 1 duplicate) state = %v, want StateArchived", engB.State)
+	}
+
+	// Engram C: representative of cluster 2 — must remain ACTIVE
+	engC, err := store.GetEngram(ctx, wsPrefix, engCID)
+	if err != nil {
+		t.Fatalf("GetEngram C: %v", err)
+	}
+	if engC.State == storage.StateArchived {
+		t.Error("engram C (high-score, cluster 2 representative) should not be archived")
+	}
+
+	// Engram D: non-representative of cluster 2 — must be ARCHIVED
+	engD, err := store.GetEngram(ctx, wsPrefix, engDID)
+	if err != nil {
+		t.Fatalf("GetEngram D: %v", err)
+	}
+	if engD.State != storage.StateArchived {
+		t.Errorf("engram D (low-score, cluster 2 duplicate) state = %v, want StateArchived", engD.State)
+	}
+
+	// Engram E: unique cluster — must remain ACTIVE
+	engE, err := store.GetEngram(ctx, wsPrefix, engEID)
+	if err != nil {
+		t.Fatalf("GetEngram E: %v", err)
+	}
+	if engE.State == storage.StateArchived {
+		t.Error("engram E (unique, no cluster) should not be archived")
+	}
+}
+
 // writeEngramV2WithEmbedding writes an engram via the store (v2 path — embedding
 // NOT inline), then stores the embedding separately via UpdateEmbedding.
 func writeEngramV2WithEmbedding(t *testing.T, ctx context.Context, store *storage.PebbleStore, wsPrefix [8]byte, eng *storage.Engram) storage.ULID {
