@@ -618,6 +618,27 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 		}
 	}
 
+	// Store caller-provided entity-to-entity relationships in the 0x21 relationship index.
+	if len(req.EntityRelationships) > 0 {
+		wsER, _ := e.store.FindVaultPrefix(id)
+		for _, er := range req.EntityRelationships {
+			if er.FromEntity == "" || er.ToEntity == "" || er.RelType == "" {
+				continue
+			}
+			weight := er.Weight
+			if weight <= 0 {
+				weight = 0.9
+			}
+			_ = e.store.UpsertRelationshipRecord(ctx, wsER, id, storage.RelationshipRecord{
+				FromEntity: er.FromEntity,
+				ToEntity:   er.ToEntity,
+				RelType:    er.RelType,
+				Weight:     weight,
+				Source:     "inline",
+			})
+		}
+	}
+
 	// Determine if we should skip background enrichment.
 	// caller_only: skip if any caller data was provided
 	// caller_preferred: the retroactive processor checks per-field (handled there)
@@ -790,14 +811,15 @@ var ErrBatchTooLarge = fmt.Errorf("batch size exceeds maximum of %d", MaxBatchSi
 // the prepared engram plus post-commit metadata. This avoids re-deriving
 // vault prefixes and enrichment fields after the batch commits.
 type preparedBatchItem struct {
-	wsPrefix             [8]byte
-	vaultName            string
-	eng                  *storage.Engram
-	inlineMode           string
-	callerSummary        string
-	callerEntities       []mbp.InlineEntity
-	callerRelationships  []mbp.InlineRelationship
-	skipBackgroundEnrich bool
+	wsPrefix                [8]byte
+	vaultName               string
+	eng                     *storage.Engram
+	inlineMode              string
+	callerSummary           string
+	callerEntities          []mbp.InlineEntity
+	callerRelationships     []mbp.InlineRelationship
+	callerEntityRelationships []mbp.InlineEntityRelationship
+	skipBackgroundEnrich    bool
 }
 
 // WriteBatch writes multiple engrams in a single Pebble batch commit, then
@@ -887,14 +909,15 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 
 		items[i] = storage.EngramBatchItem{WSPrefix: wsPrefix, Engram: eng}
 		prepared[i] = preparedBatchItem{
-			wsPrefix:             wsPrefix,
-			vaultName:            vaultName,
-			eng:                  eng,
-			inlineMode:           inlineMode,
-			callerSummary:        callerSummary,
-			callerEntities:       callerEntities,
-			callerRelationships:  callerRelationships,
-			skipBackgroundEnrich: skipBG,
+			wsPrefix:                  wsPrefix,
+			vaultName:                 vaultName,
+			eng:                       eng,
+			inlineMode:                inlineMode,
+			callerSummary:             callerSummary,
+			callerEntities:            callerEntities,
+			callerRelationships:       callerRelationships,
+			callerEntityRelationships: req.EntityRelationships,
+			skipBackgroundEnrich:      skipBG,
 		}
 		validCount++
 	}
@@ -974,6 +997,27 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 				CreatedAt:  time.Now(),
 			}
 			_ = e.store.WriteAssociation(ctx, p.wsPrefix, id, targetULID, relAssoc)
+		}
+
+		// Store caller-provided entity-to-entity relationships in the 0x21 relationship index.
+		if len(p.callerEntityRelationships) > 0 {
+			wsER, _ := e.store.FindVaultPrefix(id)
+			for _, er := range p.callerEntityRelationships {
+				if er.FromEntity == "" || er.ToEntity == "" || er.RelType == "" {
+					continue
+				}
+				weight := er.Weight
+				if weight <= 0 {
+					weight = 0.9
+				}
+				_ = e.store.UpsertRelationshipRecord(ctx, wsER, id, storage.RelationshipRecord{
+					FromEntity: er.FromEntity,
+					ToEntity:   er.ToEntity,
+					RelType:    er.RelType,
+					Weight:     weight,
+					Source:     "inline",
+				})
+			}
 		}
 
 		if p.skipBackgroundEnrich {

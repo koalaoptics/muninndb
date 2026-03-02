@@ -64,6 +64,15 @@ type InlineRelationship struct {
 	Weight   float32 `msgpack:"weight" json:"weight"`
 }
 
+// InlineEntityRelationship is a caller-provided typed entity-to-entity relationship.
+// Stored as a RelationshipRecord in the 0x21 entity relationship index.
+type InlineEntityRelationship struct {
+	FromEntity string  `msgpack:"from_entity" json:"from_entity"`
+	ToEntity   string  `msgpack:"to_entity" json:"to_entity"`
+	RelType    string  `msgpack:"rel_type" json:"rel_type"`
+	Weight     float32 `msgpack:"weight" json:"weight"`
+}
+
 // WriteRequest stores a new engram.
 type WriteRequest struct {
 	Concept      string        `msgpack:"concept"`
@@ -80,9 +89,10 @@ type WriteRequest struct {
 	TypeLabel    string        `msgpack:"type_label,omitempty"`
 
 	// Inline enrichment: caller-provided data that bypasses background enrichment.
-	Summary       string               `msgpack:"summary,omitempty"`
-	Entities      []InlineEntity        `msgpack:"entities,omitempty"`
-	Relationships []InlineRelationship  `msgpack:"relationships,omitempty"`
+	Summary              string                     `msgpack:"summary,omitempty"`
+	Entities             []InlineEntity             `msgpack:"entities,omitempty"`
+	Relationships        []InlineRelationship       `msgpack:"relationships,omitempty"`
+	EntityRelationships  []InlineEntityRelationship `msgpack:"entity_relationships,omitempty"`
 }
 
 // WriteResponse confirms a write and returns the assigned ULID.

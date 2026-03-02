@@ -488,6 +488,7 @@ var relTypeBytes = map[string]uint8{
 	"manages": 0x01, "uses": 0x02, "depends_on": 0x03,
 	"implements": 0x04, "created_by": 0x05, "part_of": 0x06,
 	"causes": 0x07, "contradicts": 0x08, "supports": 0x09,
+	"co_occurs_with": 0x0A, "caches_with": 0x0B,
 }
 
 func relTypeByteFromString(relType string) uint8 {
