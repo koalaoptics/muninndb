@@ -515,7 +515,7 @@ document.addEventListener('alpine:init', () => {
             id: e.id,
             concept: e.concept,
             vault: e.vault || this.vault,
-            createdAt: e.createdAt,
+            createdAt: e.created_at,
           });
           if (this.liveFeed.length > 20) this.liveFeed.pop();
         }
@@ -617,8 +617,8 @@ document.addEventListener('alpine:init', () => {
         const entries = resp.entries || (Array.isArray(resp) ? resp : []);
         const counts = new Array(7).fill(0);
         entries.forEach(e => {
-          if (!e.createdAt) return;
-          const diffMs = now - new Date(e.createdAt * 1000);
+          if (!e.created_at) return;
+          const diffMs = now - new Date(e.created_at * 1000);
           const diffDays = Math.floor(diffMs / 86400000);
           const idx = 6 - diffDays;
           if (idx >= 0 && idx < 7) counts[idx]++;
@@ -726,7 +726,7 @@ document.addEventListener('alpine:init', () => {
           content: a.content,
           confidence: a.confidence || a.score || 0,
           vault: this.vault,
-          createdAt: a.createdAt || 0,
+          createdAt: a.created_at || 0,
         }));
         this.totalMemories = this.memories.length;
         this.page = 0;
@@ -1068,9 +1068,9 @@ document.addEventListener('alpine:init', () => {
               const links = resp.links || [];
               return links.map(l => ({
                 data: {
-                  id: e.id + '-' + l.targetId,
+                  id: e.id + '-' + l.target_id,
                   source: e.id,
-                  target: l.targetId,
+                  target: l.target_id,
                   weight: l.weight || 0.5,
                 },
               }));
