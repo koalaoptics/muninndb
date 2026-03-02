@@ -8,6 +8,9 @@ document.addEventListener('alpine:init', () => {
     currentView: 'dashboard',
     vault: localStorage.getItem('muninnVault') || 'default',
     vaults: ['default'],
+    vaultModalOpen: false,
+    vaultPickerSearch: '',
+    newVaultModal: { show: false, name: '', error: '', loading: false },
     isDarkMode: localStorage.getItem('muninnTheme') !== 'light',
     liveConnected: false,
     appVersion: '',
@@ -58,7 +61,11 @@ document.addEventListener('alpine:init', () => {
 
     // Graph
     graphLoaded: false,
+    graphTab: 'memory',
     _cy: null,
+    entityGraphLoaded: false,
+    entityGraphStatus: '',
+    _entityCy: null,
 
     // Session
     sessionRange: '24h',
@@ -431,6 +438,13 @@ document.addEventListener('alpine:init', () => {
       this._onViewEnter(this.currentView);
     },
 
+    pickVault(v) {
+      this.vault = v;
+      this.vaultModalOpen = false;
+      this.vaultPickerSearch = '';
+      this.onVaultChange();
+    },
+
     toggleSidebar() {
       this.sidebarExpanded = !this.sidebarExpanded;
       localStorage.setItem('muninnSidebar', this.sidebarExpanded ? 'expanded' : 'collapsed');
@@ -501,7 +515,7 @@ document.addEventListener('alpine:init', () => {
             id: e.id,
             concept: e.concept,
             vault: e.vault || this.vault,
-            createdAt: e.createdAt,
+            createdAt: e.created_at,
           });
           if (this.liveFeed.length > 20) this.liveFeed.pop();
         }
@@ -561,7 +575,7 @@ document.addEventListener('alpine:init', () => {
     async loadVaults() {
       try {
         const data = await this.apiCall('/api/vaults');
-        this.vaults = Array.isArray(data) ? data : ['default'];
+        this.vaults = Array.isArray(data) ? data.slice().sort((a, b) => a.localeCompare(b)) : ['default'];
         if (!this.vaults.includes(this.vault)) {
           this.vault = this.vaults[0] || 'default';
           localStorage.setItem('muninnVault', this.vault);
@@ -603,8 +617,8 @@ document.addEventListener('alpine:init', () => {
         const entries = resp.entries || (Array.isArray(resp) ? resp : []);
         const counts = new Array(7).fill(0);
         entries.forEach(e => {
-          if (!e.createdAt) return;
-          const diffMs = now - new Date(e.createdAt * 1000);
+          if (!e.created_at) return;
+          const diffMs = now - new Date(e.created_at * 1000);
           const diffDays = Math.floor(diffMs / 86400000);
           const idx = 6 - diffDays;
           if (idx >= 0 && idx < 7) counts[idx]++;
@@ -712,7 +726,7 @@ document.addEventListener('alpine:init', () => {
           content: a.content,
           confidence: a.confidence || a.score || 0,
           vault: this.vault,
-          createdAt: a.createdAt || 0,
+          createdAt: a.created_at || 0,
         }));
         this.totalMemories = this.memories.length;
         this.page = 0;
@@ -989,16 +1003,21 @@ document.addEventListener('alpine:init', () => {
     },
 
     // ── Create vault ───────────────────────────────────────────────────────
-    async createVault() {
-      const name = prompt('Enter new vault name (lowercase letters, digits, hyphens, underscores; 1-64 chars):');
+    createVault() {
+      this.newVaultModal = { show: true, name: '', error: '', loading: false };
+    },
+
+    async submitNewVault() {
+      const name = this.newVaultModal.name.trim();
       if (!name) return;
       const valid = /^[a-z0-9_-]{1,64}$/.test(name);
       if (!valid) {
-        this.addNotification('error', 'Vault name must be 1-64 lowercase letters, digits, hyphens, or underscores');
+        this.newVaultModal.error = 'Lowercase letters, digits, hyphens, underscores only (1-64 chars)';
         return;
       }
+      this.newVaultModal.loading = true;
+      this.newVaultModal.error = '';
       try {
-        // Register vault config entry (creates the vault record)
         const r = await fetch('/api/admin/vaults/config', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -1008,7 +1027,6 @@ document.addEventListener('alpine:init', () => {
           const text = await r.text().catch(() => r.statusText);
           throw new Error(r.status + ': ' + text);
         }
-        // Hello handshake registers the vault name in the storage index
         await fetch('/api/hello', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1017,9 +1035,12 @@ document.addEventListener('alpine:init', () => {
         this.vault = name;
         localStorage.setItem('muninnVault', name);
         await this.loadVaults();
-        this.addNotification('success', 'Vault  + name +  created');
+        this.newVaultModal.loading = false;
+        this.newVaultModal.show = false;
+        this.addNotification('success', 'Vault "' + name + '" created');
       } catch (err) {
-        this.addNotification('error', 'Create vault failed: ' + err.message);
+        this.newVaultModal.error = err.message;
+        this.newVaultModal.loading = false;
       }
     },
 
@@ -1047,9 +1068,9 @@ document.addEventListener('alpine:init', () => {
               const links = resp.links || [];
               return links.map(l => ({
                 data: {
-                  id: e.id + '-' + l.targetId,
+                  id: e.id + '-' + l.target_id,
                   source: e.id,
-                  target: l.targetId,
+                  target: l.target_id,
                   weight: l.weight || 0.5,
                 },
               }));
@@ -1170,6 +1191,211 @@ document.addEventListener('alpine:init', () => {
     },
     graphFit() {
       if (this._cy) { this._cy.fit(); }
+    },
+
+    // ── Entity Graph ───────────────────────────────────────────────────────
+    async loadEntityGraph() {
+      this.entityGraphStatus = 'Loading entity graph…';
+      try {
+        // Get MCP info first to find the MCP endpoint
+        const mcpInfo = await this.apiCall('/api/admin/mcp-info');
+        const mcpURL = mcpInfo.url || 'http://localhost:8750/mcp';
+
+        // Call muninn_export_graph via MCP
+        const mcpRequest = {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            name: 'muninn_export_graph',
+            arguments: {
+              vault: this.vault,
+              format: 'json-ld',
+              include_engrams: true
+            }
+          }
+        };
+
+        const resp = await fetch(mcpURL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(mcpRequest)
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => resp.statusText);
+          throw new Error('MCP error: ' + resp.status + ' ' + text);
+        }
+
+        const json = await resp.json();
+        if (json.error) {
+          throw new Error('MCP error: ' + json.error.message);
+        }
+
+        // Parse the result
+        const result = JSON.parse(json.result.content[0].text);
+        const data = JSON.parse(result.data);
+        const graph = data['@graph'] || [];
+
+        // Extract nodes and edges from JSON-LD
+        const nodes = [];
+        const edges = [];
+        const nodeIdSet = new Set();
+
+        graph.forEach(item => {
+          if (item['@type'] === 'muninn:Entity') {
+            const entityId = item['@id'] || '';
+            const entityName = item.name || entityId.replace('muninn:entity/', '');
+            const entityType = (item['muninn:entityType'] || 'other').toLowerCase();
+
+            nodeIdSet.add(entityId);
+            nodes.push({
+              id: entityId,
+              label: entityName,
+              title: entityName + ' (' + entityType + ')',
+              shape: 'dot',
+              size: 16,
+              color: this.getEntityTypeColor(entityType),
+              font: { size: 11, color: '#e2e8f0' },
+              borderWidth: 2,
+              borderWidthSelected: 3,
+              borderColor: 'rgba(255,255,255,0.2)'
+            });
+          } else if (item['@type'] === 'muninn:Relationship') {
+            const from = item['muninn:from'] || '';
+            const to = item['muninn:to'] || '';
+            const relType = item['muninn:relType'] || '';
+            const weight = item['muninn:weight'] || 0.5;
+
+            if (nodeIdSet.has(from) && nodeIdSet.has(to)) {
+              edges.push({
+                from: from,
+                to: to,
+                label: relType,
+                arrows: 'to',
+                color: 'rgba(168,85,247,0.4)',
+                font: { size: 10, color: '#ccc' },
+                width: Math.max(1, weight * 3),
+                smooth: { type: 'continuous' }
+              });
+            }
+          }
+        });
+
+        if (nodes.length === 0) {
+          this.entityGraphStatus = 'No entities found in vault';
+          return;
+        }
+
+        // Reinit or destroy existing graph
+        if (this._entityCy) { this._entityCy.destroy(); this._entityCy = null; }
+
+        // Create vis.Network-style data structure for Cytoscape
+        const elements = nodes.concat(edges);
+
+        this._entityCy = cytoscape({
+          container: document.getElementById('entity-cy'),
+          elements: elements,
+          style: [
+            {
+              selector: 'node',
+              style: {
+                'background-color': 'data(color)',
+                'width': 'data(size)',
+                'height': 'data(size)',
+                'label': 'data(label)',
+                'color': 'data(font.color)',
+                'font-size': 'data(font.size)',
+                'text-valign': 'center',
+                'text-halign': 'center',
+                'border-width': 'data(borderWidth)',
+                'border-color': 'data(borderColor)',
+                'text-background': true,
+                'text-background-color': 'rgba(0,0,0,0.5)',
+                'text-background-padding': '2px',
+                'text-background-shape': 'roundrectangle',
+                'text-wrap': 'wrap',
+                'text-max-width': '80px'
+              }
+            },
+            {
+              selector: 'node:selected',
+              style: {
+                'border-width': 'data(borderWidthSelected)',
+                'border-color': '#06b6d4'
+              }
+            },
+            {
+              selector: 'edge',
+              style: {
+                'line-color': 'data(color)',
+                'width': 'data(width)',
+                'curve-style': 'bezier',
+                'opacity': 0.7,
+                'label': 'data(label)',
+                'color': 'data(font.color)',
+                'font-size': 'data(font.size)',
+                'text-background': true,
+                'text-background-color': 'rgba(0,0,0,0.5)',
+                'text-background-padding': '2px',
+                'text-background-shape': 'roundrectangle'
+              }
+            }
+          ],
+          layout: {
+            name: 'fcose',
+            animate: true,
+            animationDuration: 600,
+            animationEasing: 'ease-out'
+          },
+          wheelSensitivity: 0.3
+        });
+
+        // Add click handler to show entity info
+        this._entityCy.on('tap', 'node', (evt) => {
+          const node = evt.target;
+          this.addNotification('info', node.data('label') + ' (' + node.data('id').replace('muninn:entity/', '') + ')');
+        });
+
+        this.entityGraphLoaded = true;
+        this.entityGraphStatus = 'Loaded ' + nodes.length + ' entities, ' + edges.length + ' relationships';
+        this.addNotification('success', this.entityGraphStatus);
+      } catch (err) {
+        this.entityGraphStatus = 'Error: ' + err.message;
+        this.addNotification('error', 'Entity graph failed: ' + err.message);
+      }
+    },
+
+    getEntityTypeColor(entityType) {
+      const colors = {
+        'person': '#3b82f6',           // blue
+        'organization': '#8b5cf6',     // purple
+        'technology': '#10b981',       // emerald
+        'project': '#f59e0b',          // amber
+        'location': '#ec4899',         // pink
+        'concept': '#6366f1',          // indigo
+        'tool': '#14b8a6',             // teal
+        'database': '#8b5cf6',         // purple
+        'service': '#06b6d4',          // cyan
+        'framework': '#10b981',        // emerald
+        'language': '#f59e0b',         // amber
+        'product': '#ef4444',          // red
+        'event': '#84cc16',            // lime
+        'other': '#64748b'             // slate
+      };
+      return colors[entityType] || colors['other'];
+    },
+
+    entityGraphZoomIn() {
+      if (this._entityCy) { this._entityCy.zoom(this._entityCy.zoom() * 1.25); this._entityCy.center(); }
+    },
+
+    entityGraphZoomOut() {
+      if (this._entityCy) { this._entityCy.zoom(this._entityCy.zoom() * 0.8); this._entityCy.center(); }
+    },
+
+    entityGraphFit() {
+      if (this._entityCy) { this._entityCy.fit(); }
     },
 
     // ── Session ────────────────────────────────────────────────────────────

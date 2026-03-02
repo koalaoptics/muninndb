@@ -28,6 +28,17 @@ func (s *Store) VaultAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				http.Error(w, `{"error":"invalid api key"}`, http.StatusUnauthorized)
 				return
 			}
+			// Enforce vault scoping: the key must be issued for the requested vault.
+			if key.Vault != vault {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				errMsg, _ := json.Marshal(map[string]string{
+					"error": fmt.Sprintf("api key is not authorized for vault %q", vault),
+					"code":  "VAULT_KEY_MISMATCH",
+				})
+				w.Write(errMsg)
+				return
+			}
 			ctx := context.WithValue(r.Context(), ContextVault, key.Vault)
 			ctx = context.WithValue(ctx, ContextMode, key.Mode)
 			ctx = context.WithValue(ctx, ContextAPIKey, &key)
@@ -79,6 +90,29 @@ func (s *Store) AdminAPIMiddleware(secret []byte, next http.HandlerFunc) http.Ha
 			return
 		}
 		next(w, r)
+	}
+}
+
+// VaultAuthWithAdminBypass combines vault-level API key auth with an admin
+// session bypass. A valid admin session cookie (muninn_session) grants full
+// write-mode access to any vault — the Web UI admin console uses this path.
+// External API clients continue to authenticate with Bearer tokens as before.
+func (s *Store) VaultAuthWithAdminBypass(secret []byte, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Admin session bypass — authenticated Web UI gets full access to any vault.
+		cookie, err := r.Cookie("muninn_session")
+		if err == nil && validateSessionToken(cookie.Value, secret) {
+			vault := r.URL.Query().Get("vault")
+			if vault == "" {
+				vault = "default"
+			}
+			ctx := context.WithValue(r.Context(), ContextVault, vault)
+			ctx = context.WithValue(ctx, ContextMode, "write")
+			next(w, r.WithContext(ctx))
+			return
+		}
+		// Fall through to standard vault auth (Bearer token or public vault).
+		s.VaultAuthMiddleware(next)(w, r)
 	}
 }
 

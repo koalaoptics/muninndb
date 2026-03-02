@@ -13,10 +13,39 @@ type AssocWeightUpdate struct {
 	Weight float32
 }
 
+// OrdinalEntry is a (childID, ordinal) pair returned by ListChildOrdinals.
+type OrdinalEntry struct {
+	ChildID ULID
+	Ordinal int32
+}
+
+// StoreBatch is a write-only handle for atomic multi-write operations.
+// Callers must call Commit or Discard exactly once.
+type StoreBatch interface {
+	// WriteEngram queues an engram write into the batch.
+	WriteEngram(ctx context.Context, wsPrefix [8]byte, eng *Engram) error
+	// WriteAssociation queues association forward (0x03), reverse (0x04) keys into the batch.
+	WriteAssociation(ctx context.Context, wsPrefix [8]byte, src, dst ULID, assoc *Association) error
+	// WriteOrdinal queues the ordinal key for (parentID, childID) into the batch.
+	WriteOrdinal(ctx context.Context, wsPrefix [8]byte, parentID, childID ULID, ordinal int32) error
+	// UpdateEngramState queues a state update for an existing engram into the batch.
+	// Reads the current engram from the underlying store, sets its state, and queues
+	// updated 0x01 and 0x02 key writes.
+	UpdateEngramState(ctx context.Context, ws [8]byte, id ULID, newState LifecycleState) error
+	// Commit atomically commits all queued writes.
+	Commit() error
+	// Discard releases the batch without writing anything.
+	// Safe to call after Commit (idempotent).
+	Discard()
+}
+
 // EngineStore is the storage interface for the MuninnDB engine.
 // Implemented by the Pebble-backed store. All operations are vault-scoped
 // via the vault prefix in the key construction.
 type EngineStore interface {
+	// NewBatch returns a StoreBatch for atomic multi-engram writes.
+	// The caller must call Commit or Discard exactly once on the returned batch.
+	NewBatch() StoreBatch
 	// WriteEngram atomically writes the full engram record (0x01 key) and
 	// the metadata-only copy (0x02 key) in a single Pebble batch.
 	// Also writes association forward/reverse keys (0x03/0x04) and secondary
@@ -82,6 +111,10 @@ type EngineStore interface {
 	// GetConceptAssociations returns up to maxN neighbor IDs for spreading activation.
 	GetConceptAssociations(ctx context.Context, wsPrefix [8]byte, id ULID, maxN int) ([]ULID, error)
 
+	// GetChildrenByParent returns IDs of all engrams that have an is_part_of
+	// association pointing to parentID. Scans the 0x04 reverse index.
+	GetChildrenByParent(ctx context.Context, wsPrefix [8]byte, parentID ULID) ([]ULID, error)
+
 	// FlagContradiction writes the 0x0A contradiction key for pair (a,b).
 	FlagContradiction(ctx context.Context, wsPrefix [8]byte, a, b ULID) error
 
@@ -116,6 +149,81 @@ type EngineStore interface {
 	// EngramsByCreatedSince returns engrams created at or after since, ordered
 	// by creation time (ascending), with offset/limit for pagination.
 	EngramsByCreatedSince(ctx context.Context, wsPrefix [8]byte, since time.Time, offset, limit int) ([]*Engram, error)
+
+	// WriteOrdinal atomically writes the ordinal for childID within parentID.
+	// Overwrites any existing value.
+	WriteOrdinal(ctx context.Context, wsPrefix [8]byte, parentID, childID ULID, ordinal int32) error
+
+	// ReadOrdinal reads the ordinal for (parentID, childID).
+	// Returns found=false if the key does not exist.
+	ReadOrdinal(ctx context.Context, wsPrefix [8]byte, parentID, childID ULID) (ordinal int32, found bool, err error)
+
+	// DeleteOrdinal removes the ordinal key for (parentID, childID). No-op if absent.
+	DeleteOrdinal(ctx context.Context, wsPrefix [8]byte, parentID, childID ULID) error
+
+	// DeleteEngramOrdinal removes the ordinal key for (parentID, childID).
+	// Called by the engram delete hook to clean up tree membership when a child
+	// engram is deleted. No-op if the key does not exist.
+	DeleteEngramOrdinal(ctx context.Context, wsPrefix [8]byte, parentID, childID ULID) error
+
+	// ListChildOrdinals returns all (childID, ordinal) pairs for parentID,
+	// sorted by ordinal ascending.
+	ListChildOrdinals(ctx context.Context, wsPrefix [8]byte, parentID ULID) ([]OrdinalEntry, error)
+
+	// UpsertEntityRecord stores or updates a global entity record.
+	UpsertEntityRecord(ctx context.Context, record EntityRecord, source string) error
+
+	// GetEntityRecord reads a global entity record by canonical name. Returns nil, nil if not found.
+	GetEntityRecord(ctx context.Context, name string) (*EntityRecord, error)
+
+	// WriteEntityEngramLink writes a vault-scoped engram→entity link.
+	WriteEntityEngramLink(ctx context.Context, ws [8]byte, engramID ULID, entityName string) error
+
+	// ScanEntityEngrams scans the 0x23 reverse index for all vault-scoped (ws, engramID)
+	// pairs that mention the given entity name. Calls fn for each pair until fn returns
+	// a non-nil error or the index is exhausted.
+	ScanEntityEngrams(ctx context.Context, entityName string, fn func(ws [8]byte, engramID ULID) error) error
+
+	// ScanEngramEntities scans the 0x20 forward index for all entities mentioned
+	// by the given engram in vault ws. Calls fn for each entity name.
+	ScanEngramEntities(ctx context.Context, ws [8]byte, engramID ULID, fn func(entityName string) error) error
+
+	// ScanVaultEntityNames scans the 0x20 forward index for all distinct entity names
+	// in a vault. fn is called exactly once per unique name.
+	ScanVaultEntityNames(ctx context.Context, ws [8]byte, fn func(name string) error) error
+
+	// UpsertRelationshipRecord writes a vault-scoped relationship record.
+	UpsertRelationshipRecord(ctx context.Context, ws [8]byte, engramID ULID, record RelationshipRecord) error
+
+	// ScanRelationships scans all vault-scoped relationship records at the 0x21 prefix.
+	// Calls fn for each RelationshipRecord until fn returns a non-nil error or the scan is exhausted.
+	ScanRelationships(ctx context.Context, ws [8]byte, fn func(record RelationshipRecord) error) error
+
+	// IncrementEntityCoOccurrence increments the co-occurrence count for two entity names
+	// within a vault. Uses the 0x24 index. Pair is stored in canonical (hashA <= hashB) order.
+	IncrementEntityCoOccurrence(ctx context.Context, ws [8]byte, nameA, nameB string) error
+
+	// ScanEntityClusters scans the 0x24 co-occurrence index for the given vault and calls
+	// fn for each pair with count >= minCount.
+	ScanEntityClusters(ctx context.Context, ws [8]byte, minCount int, fn func(nameA, nameB string, count int) error) error
+
+	// WriteLastAccessEntry writes/updates the 0x22 LastAccess index entry.
+	// prevMillis is the old LastAccess unix-millis (0 if first write).
+	// newMillis is the new LastAccess unix-millis.
+	WriteLastAccessEntry(ctx context.Context, ws [8]byte, id ULID, prevMillis, newMillis int64) error
+
+	// ScanLastAccessDesc scans the 0x22 index in descending LastAccess order
+	// (ascending byte scan due to inverted millis encoding).
+	ScanLastAccessDesc(ctx context.Context, ws [8]byte, fn func(id ULID, lastAccessMillis int64) error) error
+
+	// DeleteLastAccessEntry removes the 0x22 index entry for a deleted engram.
+	DeleteLastAccessEntry(ctx context.Context, ws [8]byte, id ULID, lastAccessMillis int64) error
+
+	// CheckIdempotency looks up an op_id receipt. Returns nil, nil if not found.
+	CheckIdempotency(ctx context.Context, opID string) (*IdempotencyReceipt, error)
+
+	// WriteIdempotency stores an idempotency receipt (op_id → engramID).
+	WriteIdempotency(ctx context.Context, opID, engramID string) error
 
 	// Close flushes all pending writes and closes the Pebble database.
 	Close() error

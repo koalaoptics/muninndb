@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/scrypster/muninndb/internal/auth"
+	"github.com/scrypster/muninndb/internal/engine"
+	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/transport/mbp"
 )
 
@@ -82,6 +84,78 @@ func (f *fakeEngine) RetryEnrich(ctx context.Context, vault string, id string) (
 func (f *fakeEngine) GetVaultPlasticity(_ context.Context, _ string) (*auth.ResolvedPlasticity, error) {
 	r := auth.ResolvePlasticity(nil)
 	return &r, nil
+}
+func (f *fakeEngine) RememberTree(_ context.Context, req *RememberTreeRequest) (*RememberTreeResult, error) {
+	return &RememberTreeResult{RootID: "fake-root-id", NodeMap: map[string]string{}}, nil
+}
+func (f *fakeEngine) RecallTree(_ context.Context, vault, rootID string, maxDepth, limit int, includeCompleted bool) (*RecallTreeResult, error) {
+	return &RecallTreeResult{Root: &TreeNode{ID: rootID, Concept: "fake", State: "active", Children: []TreeNode{}}}, nil
+}
+func (f *fakeEngine) AddChild(_ context.Context, vault, parentID string, child *AddChildRequest) (*AddChildResult, error) {
+	return &AddChildResult{ChildID: "fake-child-id", Ordinal: 1}, nil
+}
+func (f *fakeEngine) CountChildren(_ context.Context, vault, engramID string) (int, error) {
+	return 0, nil
+}
+func (f *fakeEngine) GetEnrichmentMode(_ context.Context) string {
+	return "none"
+}
+func (f *fakeEngine) WhereLeftOff(_ context.Context, _ string, _ int) ([]WhereLeftOffEntry, error) {
+	return []WhereLeftOffEntry{}, nil
+}
+func (f *fakeEngine) FindByEntity(_ context.Context, _, _ string, _ int) ([]*storage.Engram, error) {
+	return nil, nil
+}
+func (f *fakeEngine) CheckIdempotency(_ context.Context, _ string) (*storage.IdempotencyReceipt, error) {
+	return nil, nil
+}
+func (f *fakeEngine) WriteIdempotency(_ context.Context, _, _ string) error {
+	return nil
+}
+func (f *fakeEngine) SetEntityState(_ context.Context, _, _, _ string) error {
+	return nil
+}
+func (f *fakeEngine) GetEntityClusters(_ context.Context, _ string, _, _ int) ([]EntityClusterResult, error) {
+	return []EntityClusterResult{}, nil
+}
+func (f *fakeEngine) ExportGraph(_ context.Context, _ string, _ bool) (*engine.ExportGraph, error) {
+	return &engine.ExportGraph{Nodes: []engine.GraphNode{}, Edges: []engine.GraphEdge{}}, nil
+}
+func (f *fakeEngine) GetEntityTimeline(_ context.Context, _ string, _ string, _ int) (*engine.EntityTimeline, error) {
+	return &engine.EntityTimeline{Entity: "test", FirstSeen: time.Now(), MentionCount: 0, Entries: []engine.TimelineEntry{}, Count: 0}, nil
+}
+func (f *fakeEngine) FindSimilarEntities(_ context.Context, _ string, _ float64, _ int) ([]engine.SimilarEntityPair, error) {
+	return []engine.SimilarEntityPair{}, nil
+}
+func (f *fakeEngine) MergeEntity(_ context.Context, _, _, _ string, _ bool) (*engine.MergeEntityResult, error) {
+	return &engine.MergeEntityResult{}, nil
+}
+func (f *fakeEngine) ReplayEnrichment(_ context.Context, _ string, _ []string, _ int, dryRun bool) (*engine.ReplayEnrichmentResult, error) {
+	return &engine.ReplayEnrichmentResult{
+		Processed: 3,
+		Skipped:   1,
+		StagesRun: []string{"entities", "relationships", "classification", "summary"},
+		DryRun:    dryRun,
+	}, nil
+}
+
+func (f *fakeEngine) GetProvenance(_ context.Context, _, _ string) ([]ProvenanceEntry, error) {
+	return []ProvenanceEntry{}, nil
+}
+
+func (f *fakeEngine) RecordFeedback(_ context.Context, _, _ string, _ bool) error {
+	return nil
+}
+
+func (f *fakeEngine) GetEntityAggregate(_ context.Context, _, _ string, _ int) (*EntityAggregate, error) {
+	return &EntityAggregate{
+		Name: "test", Type: "person", Confidence: 1.0, MentionCount: 1, State: "active",
+		Engrams: []EntityEngramSummary{}, Relationships: []EntityRelSummary{}, CoOccurring: []EntityCoOccurrence{},
+	}, nil
+}
+
+func (f *fakeEngine) ListEntities(_ context.Context, _ string, _ int, _ string) ([]EntitySummary, error) {
+	return []EntitySummary{}, nil
 }
 
 func newTestServer() *MCPServer {
@@ -181,8 +255,8 @@ func TestListTools(t *testing.T) {
 	var result map[string]any
 	json.NewDecoder(w.Body).Decode(&result)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 19 {
-		t.Errorf("expected 19 tools, got %d", len(tools))
+	if len(tools) != 35 {
+		t.Errorf("expected 35 tools, got %d", len(tools))
 	}
 }
 
@@ -280,6 +354,25 @@ func TestHandleRememberMissingContent(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp.Error == nil || resp.Error.Code != -32602 {
 		t.Errorf("expected -32602, got %v", resp.Error)
+	}
+}
+
+func TestHandleRemember_RejectsWhitespaceContent(t *testing.T) {
+	srv := newTestServer()
+	// Attempt to remember with whitespace-only content (spaces, tabs, newlines).
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_remember","arguments":{"vault":"default","content":"   "}}}`
+	w := postRPC(t, srv, body)
+	if w.Code != http.StatusOK {
+		t.Errorf("HTTP status = %d, want 200 (JSON-RPC errors return 200)", w.Code)
+	}
+	var resp JSONRPCResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Error == nil {
+		t.Fatal("expected error for whitespace-only content, got nil")
+	}
+	// Expect a parameter validation error code (-32602).
+	if resp.Error.Code != -32602 {
+		t.Errorf("error code = %d, want -32602", resp.Error.Code)
 	}
 }
 

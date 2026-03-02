@@ -598,6 +598,7 @@ func runServer() {
 	// migRunner.Register(migrate.Migration{Version: 1, Description: "...", Up: func(db *pebble.DB) error { ... }})
 	if applied, err := migRunner.Run(); err != nil {
 		slog.Error("migration failed", "err", err)
+		db.Close()
 		os.Exit(1)
 	} else if applied > 0 {
 		slog.Info("migrations applied", "count", applied)
@@ -718,13 +719,16 @@ func runServer() {
 	// Build trigger system
 	trigSystem := trigger.New(store, trigger.NewFTSAdapter(ftsIndex), trigger.NewHNSWAdapter(hnswRegistry), embedder)
 
+	// Signal handling context — created early so workers can inherit it for graceful shutdown.
+	ctx, cancel := context.WithCancel(context.Background())
+
 	// Create cognitive workers with storage adapters
 	hebbianWorkerImpl := cognitive.NewHebbianWorker(cognitive.NewHebbianStoreAdapter(store))
 	contradictWorkerImpl := cognitive.NewContradictWorker(cognitive.NewContradictStoreAdapter(store))
 	confidenceWorkerImpl := cognitive.NewConfidenceWorker(cognitive.NewConfidenceStoreAdapter(store))
 
 	// Create PAS transition worker, wiring it to the TransitionCache.
-	transitionWorkerImpl := cognitive.NewTransitionWorker(store.TransitionCache())
+	transitionWorkerImpl := cognitive.NewTransitionWorker(ctx, store.TransitionCache())
 	actEngine.SetTransitionStore(store.TransitionCache())
 
 	// Build engine API - pass the full worker implementations
@@ -755,7 +759,7 @@ func runServer() {
 			conf := cognitive.NewConfidenceWorker(confidenceStore)
 			eng.SetCognitiveWorkers(cogHeb, contra.Worker, conf.Worker)
 
-			cogTransition = cognitive.NewTransitionWorker(store.TransitionCache())
+			cogTransition = cognitive.NewTransitionWorker(ctx, store.TransitionCache())
 			eng.SetTransitionWorker(cogTransition)
 
 			var cogCtx context.Context
@@ -818,7 +822,6 @@ func runServer() {
 	grpcServer := grpcpkg.NewServer(*grpcAddr, grpcAdapter, authStore, clientTLS)
 
 	// Signal handling
-	ctx, cancel := context.WithCancel(context.Background())
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 

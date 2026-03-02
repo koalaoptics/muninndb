@@ -1837,6 +1837,54 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/engrams/{id}/tags:
+    put:
+      tags: [engrams]
+      summary: "Replace the full tag set on an engram."
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tags]
+              properties:
+                vault:
+                  type: string
+                  default: "default"
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: "Tags updated."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  tags:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   # ── Recall ────────────────────────────────────────────────────────────────
 
   /api/activate:
@@ -2284,6 +2332,44 @@ paths:
                 properties:
                   status:
                     type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/admin/contradictions/resolve:
+    post:
+      tags: [admin-system]
+      summary: "Resolve a detected contradiction between two engrams."
+      security:
+        - AdminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id_a, id_b]
+              properties:
+                vault:
+                  type: string
+                  default: "default"
+                id_a:
+                  type: string
+                id_b:
+                  type: string
+      responses:
+        "200":
+          description: "Contradiction resolved."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resolved:
+                    type: boolean
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":

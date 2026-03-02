@@ -83,6 +83,9 @@ func generateGuide(vaultName string, resolved auth.ResolvedPlasticity, stats eng
 	b.WriteString("- **muninn_state** — Transition a memory's lifecycle state\n")
 	b.WriteString("- **muninn_list_deleted** — List recoverable deleted memories\n")
 	b.WriteString("- **muninn_retry_enrich** — Re-queue a memory for enrichment\n")
+	b.WriteString("- **muninn_remember_tree** — Store a nested engram tree in one call\n")
+	b.WriteString("- **muninn_recall_tree** — Retrieve the complete ordered tree from a root ID\n")
+	b.WriteString("- **muninn_add_child** — Append or insert a child node under a parent\n")
 
 	// Vault Configuration Summary
 	b.WriteString("\n## Vault Configuration\n\n")
@@ -115,6 +118,30 @@ func generateGuide(vaultName string, resolved auth.ResolvedPlasticity, stats eng
 	b.WriteString("  1. \"Decided on JWTs with 15-minute expiry for authentication\" (type: decision)\n")
 	b.WriteString("  2. \"Tom is implementing the auth system\" (type: task)\n")
 	b.WriteString("  3. \"API rate limit set to 100 requests/second per client\" (type: decision)\n")
+
+	// Hierarchical memory
+	b.WriteString("\n## Hierarchical Memory\n\n")
+	b.WriteString("Use hierarchical memory whenever structure matters: project plans, task trees, ")
+	b.WriteString("meeting agendas, outlines, decision trees, or any ordered nested set of ideas. ")
+	b.WriteString("Flat memories can describe the pieces; hierarchical memory captures how those pieces relate and in what order.\n\n")
+	b.WriteString("**Storing a tree.** Call `muninn_remember_tree` with a nested `root` object. ")
+	b.WriteString("Each node has `concept`, `content`, and an optional `children` array. ")
+	b.WriteString("The call returns `root_id` (the ID of the root engram) and `node_map` (a map from concept to ID for every node written). ")
+	b.WriteString("Save the `root_id` — it is your handle to the entire structure.\n\n")
+	b.WriteString("**The magic moment workflow.** When you need the tree back:\n")
+	b.WriteString("1. Call `muninn_recall(context=[\"the plan concept\"])` — this finds the root engram by concept.\n")
+	b.WriteString("2. Take the returned ID and call `muninn_recall_tree(root_id=<id>)` — this reconstructs the complete ordered structure in one shot.\n\n")
+	b.WriteString("You do not need to traverse links manually. `muninn_recall_tree` walks the `is_part_of` associations ")
+	b.WriteString("and returns the whole tree sorted by ordinal at every level.\n\n")
+	b.WriteString("**Incremental updates.** Trees are not write-once:\n")
+	b.WriteString("- Add new nodes: `muninn_add_child(parent_id, concept, content)` — appends after existing children by default, ")
+	b.WriteString("or inserts at a specific position with the `ordinal` param.\n")
+	b.WriteString("- Edit a node: `muninn_evolve(id, new_content, reason)` — updates content in-place without breaking the tree structure.\n")
+	b.WriteString("- Cross-reference: `muninn_link(source_id, target_id, relation)` — adds semantic edges between tree nodes and flat memories.\n\n")
+	b.WriteString("**Filtering on recall.** `muninn_recall_tree` supports three optional params:\n")
+	b.WriteString("- `include_completed=false` — hides completed nodes and their entire subtrees (useful for task lists).\n")
+	b.WriteString("- `max_depth=N` — limits how deep the returned tree goes (default 10, 0 means unlimited).\n")
+	b.WriteString("- `limit=N` — caps how many children are returned per node per level.\n")
 
 	// Tips
 	b.WriteString("\n## Tips\n\n")

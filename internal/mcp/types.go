@@ -75,10 +75,22 @@ type ContradictionPair struct {
 	DetectedAt time.Time `json:"detected_at"`
 }
 
+// VaultStatus is returned by muninn_status.
 type VaultStatus struct {
 	Vault         string `json:"vault"`
 	TotalMemories int64  `json:"total_memories"`
 	Health        string `json:"health"`
+
+	// Enrichment capability
+	EnrichmentMode string                `json:"enrichment_mode"` // "none", "inline", "plugin:<name>"
+	Plugins        []PluginStatusSummary `json:"plugins,omitempty"`
+}
+
+// PluginStatusSummary is a brief health summary for one plugin.
+type PluginStatusSummary struct {
+	Name    string `json:"name"`
+	Healthy bool   `json:"healthy"`
+	Mode    string `json:"mode"` // "embed" or "enrich"
 }
 
 type SessionEntry struct {
@@ -110,10 +122,11 @@ type RestoreResult struct {
 
 // TraverseRequest defines parameters for a BFS graph traversal.
 type TraverseRequest struct {
-	StartID  string
-	MaxHops  int
-	MaxNodes int
-	RelTypes []string
+	StartID        string
+	MaxHops        int
+	MaxNodes       int
+	RelTypes       []string
+	FollowEntities bool
 }
 
 // TraverseResult is the output of a BFS graph traversal.
@@ -185,6 +198,75 @@ type RetryEnrichResult struct {
 	Note            string   `json:"note,omitempty"`
 }
 
+// ── Tree types ────────────────────────────────────────────────────────────────
+
+// TreeNodeInput is one node in a tree passed to muninn_remember_tree.
+type TreeNodeInput struct {
+	Concept  string          `json:"concept"`
+	Content  string          `json:"content"`
+	Type     string          `json:"type,omitempty"`
+	Tags     []string        `json:"tags,omitempty"`
+	Children []TreeNodeInput `json:"children,omitempty"`
+}
+
+// RememberTreeRequest is the input to RememberTree.
+type RememberTreeRequest struct {
+	Vault string        `json:"vault"`
+	Root  TreeNodeInput `json:"root"`
+}
+
+// RememberTreeResult is returned by RememberTree.
+type RememberTreeResult struct {
+	RootID  string            `json:"root_id"`
+	NodeMap map[string]string `json:"node_map"`
+}
+
+// TreeNode is a node in the recalled tree returned by muninn_recall_tree.
+type TreeNode struct {
+	ID           string     `json:"id"`
+	Concept      string     `json:"concept"`
+	State        string     `json:"state"`
+	Ordinal      int32      `json:"ordinal"`
+	LastAccessed string     `json:"last_accessed,omitempty"`
+	Children     []TreeNode `json:"children"`
+}
+
+// RecallTreeResult wraps the root TreeNode.
+type RecallTreeResult struct {
+	Root *TreeNode `json:"root"`
+}
+
+// AddChildRequest is the input for a single child node in muninn_add_child.
+type AddChildRequest struct {
+	Concept string   `json:"concept"`
+	Content string   `json:"content"`
+	Type    string   `json:"type,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Ordinal *int32   `json:"ordinal,omitempty"` // nil = append at end
+}
+
+// AddChildResult is returned by AddChild.
+type AddChildResult struct {
+	ChildID string `json:"child_id"`
+	Ordinal int32  `json:"ordinal"`
+}
+
+// WhereLeftOffEntry is one result from muninn_where_left_off.
+type WhereLeftOffEntry struct {
+	ID         string    `json:"id"`
+	Concept    string    `json:"concept"`
+	Summary    string    `json:"summary,omitempty"`
+	LastAccess time.Time `json:"last_access"`
+	State      string    `json:"state"`
+}
+
+// EntityClusterResult is one entity co-occurrence pair returned by muninn_entity_clusters.
+type EntityClusterResult struct {
+	EntityA string `json:"entity_a"`
+	EntityB string `json:"entity_b"`
+	Count   int    `json:"count"`
+}
+
 // --- Cognitive push notification param types ---
 // These are pre-serialized to json.RawMessage at emission sites.
 
@@ -208,4 +290,65 @@ type AssociationParams struct {
 	SourceID string  `json:"source_id"`
 	TargetID string  `json:"target_id"`
 	Weight   float32 `json:"weight"`
+}
+
+// ProvenanceEntry is a single audit log record returned by muninn_provenance.
+type ProvenanceEntry struct {
+	Timestamp string `json:"timestamp"` // RFC3339
+	Source    string `json:"source"`    // "human", "llm", "inferred", etc.
+	AgentID   string `json:"agent_id,omitempty"`
+	Operation string `json:"operation"` // "write", "update", "read", etc.
+	Note      string `json:"note,omitempty"`
+}
+
+// ProvenanceResult is the response from muninn_provenance.
+type ProvenanceResult struct {
+	ID      string            `json:"id"`
+	Entries []ProvenanceEntry `json:"entries"`
+}
+
+// EntityEngramSummary is a brief projection of an engram mentioning an entity.
+type EntityEngramSummary struct {
+	ID        string `json:"id"`
+	Concept   string `json:"concept"`
+	CreatedAt string `json:"created_at"` // RFC3339
+}
+
+// EntityRelSummary is one relationship involving an entity.
+type EntityRelSummary struct {
+	FromEntity string  `json:"from_entity"`
+	ToEntity   string  `json:"to_entity"`
+	RelType    string  `json:"rel_type"`
+	Weight     float32 `json:"weight"`
+}
+
+// EntityCoOccurrence is a co-occurring entity with its count.
+type EntityCoOccurrence struct {
+	EntityName string `json:"entity_name"`
+	Count      int    `json:"count"`
+}
+
+// EntityAggregate is the full aggregate view returned by muninn_entity.
+type EntityAggregate struct {
+	Name          string                `json:"name"`
+	Type          string                `json:"type"`
+	Confidence    float32               `json:"confidence"`
+	State         string                `json:"state"`
+	MentionCount  int32                 `json:"mention_count"`
+	FirstSeen     string                `json:"first_seen,omitempty"`  // RFC3339
+	UpdatedAt     string                `json:"updated_at,omitempty"`  // RFC3339
+	MergedInto    string                `json:"merged_into,omitempty"`
+	Engrams       []EntityEngramSummary `json:"engrams"`
+	Relationships []EntityRelSummary    `json:"relationships"`
+	CoOccurring   []EntityCoOccurrence  `json:"co_occurring"`
+}
+
+// EntitySummary is a lightweight entity record for muninn_entities list view.
+type EntitySummary struct {
+	Name         string  `json:"name"`
+	Type         string  `json:"type"`
+	Confidence   float32 `json:"confidence"`
+	State        string  `json:"state"`
+	MentionCount int32   `json:"mention_count"`
+	FirstSeen    string  `json:"first_seen,omitempty"` // RFC3339
 }

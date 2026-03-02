@@ -286,6 +286,51 @@ func TestResolveContradiction_BothDirections(t *testing.T) {
 	}
 }
 
+func TestGetChildrenByParent_IsPartOf(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("children-test")
+
+	parent := NewULID()
+	child1 := NewULID()
+	child2 := NewULID()
+	other := NewULID()
+
+	// child1 → parent (is_part_of)
+	if err := store.WriteAssociation(ctx, ws, child1, parent, &Association{
+		TargetID: parent, Weight: 0.9, RelType: RelIsPartOf,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// child2 → parent (is_part_of)
+	if err := store.WriteAssociation(ctx, ws, child2, parent, &Association{
+		TargetID: parent, Weight: 0.9, RelType: RelIsPartOf,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// other → parent (RelSupports — must be excluded)
+	if err := store.WriteAssociation(ctx, ws, other, parent, &Association{
+		TargetID: parent, Weight: 0.9, RelType: RelSupports,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	children, err := store.GetChildrenByParent(ctx, ws, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(children) != 2 {
+		t.Fatalf("expected 2 children (is_part_of only), got %d", len(children))
+	}
+	got := map[ULID]bool{children[0]: true, children[1]: true}
+	if !got[child1] || !got[child2] {
+		t.Errorf("missing expected children")
+	}
+	if got[other] {
+		t.Error("GetChildrenByParent must not return non-is_part_of edges")
+	}
+}
+
 // newTestStore creates a PebbleStore backed by a temp dir.
 // openTestPebble already registers Cleanup for the DB; we just wrap it in a store.
 func newTestStore(t *testing.T) *PebbleStore {
@@ -497,5 +542,62 @@ func TestGetAssociationsMultipleSourceIDs(t *testing.T) {
 	}
 	if results[srcB][0].TargetID != dst3 {
 		t.Errorf("srcB target: got %v, want %v", results[srcB][0].TargetID, dst3)
+	}
+}
+
+// TestGetAssociations_ReturnsCopy verifies that GetAssociations returns an
+// independent copy of associations. Modifying the returned slice does not
+// affect subsequent GetAssociations calls (mutation doesn't corrupt cache).
+func TestGetAssociations_ReturnsCopy(t *testing.T) {
+	store := newTestStore(t)
+
+	ctx := context.Background()
+	ws := store.VaultPrefix("assoc-copy")
+
+	src := NewULID()
+	dst1 := NewULID()
+	dst2 := NewULID()
+
+	// Write two associations from src.
+	_ = store.WriteAssociation(ctx, ws, src, dst1, &Association{TargetID: dst1, Weight: 0.7})
+	_ = store.WriteAssociation(ctx, ws, src, dst2, &Association{TargetID: dst2, Weight: 0.5})
+
+	// First call: get associations.
+	results1, err := store.GetAssociations(ctx, ws, []ULID{src}, 10)
+	if err != nil {
+		t.Fatalf("GetAssociations (first): %v", err)
+	}
+	assocs1 := results1[src]
+	if len(assocs1) != 2 {
+		t.Fatalf("expected 2 associations, got %d", len(assocs1))
+	}
+
+	// Mutate the returned slice: append a fake association.
+	fakeAssoc := Association{
+		TargetID: NewULID(),
+		Weight:   0.99,
+	}
+	assocs1 = append(assocs1, fakeAssoc)
+
+	// Second call: verify the original data is unchanged (the cache was not corrupted).
+	results2, err := store.GetAssociations(ctx, ws, []ULID{src}, 10)
+	if err != nil {
+		t.Fatalf("GetAssociations (second): %v", err)
+	}
+	assocs2 := results2[src]
+	if len(assocs2) != 2 {
+		t.Errorf("after mutation, expected 2 associations in fresh call, got %d", len(assocs2))
+	}
+
+	// Verify the data is correct (not the fake association).
+	seen := make(map[ULID]bool)
+	for _, a := range assocs2 {
+		if a.TargetID == fakeAssoc.TargetID {
+			t.Error("fake association appeared in fresh call; cache was corrupted by mutation")
+		}
+		seen[a.TargetID] = true
+	}
+	if !seen[dst1] || !seen[dst2] {
+		t.Error("original associations missing in fresh call")
 	}
 }

@@ -245,3 +245,66 @@ func TestAdminAPIMiddleware_InvalidCookie(t *testing.T) {
 		t.Errorf("expected 401 with invalid cookie, got %d", w.Code)
 	}
 }
+
+// TestAdminAPIMiddleware_VaultBearerTokenRejected verifies that a valid vault
+// API key (Bearer token) is not accepted by AdminAPIMiddleware. Admin routes
+// require a session cookie — vault keys must not grant admin access.
+func TestAdminAPIMiddleware_VaultBearerTokenRejected(t *testing.T) {
+	s := newTestStore(t)
+	secret := []byte("test-secret-32-bytes-long-enough!")
+
+	// Generate a real, valid vault API key.
+	s.SetVaultConfig(auth.VaultConfig{Name: "default", Public: false})
+	token, _, err := s.GenerateAPIKey("default", "agent", "full", nil)
+	if err != nil {
+		t.Fatalf("GenerateAPIKey: %v", err)
+	}
+
+	handlerCalled := false
+	handler := s.AdminAPIMiddleware(secret, func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest("GET", "/api/admin/keys", nil)
+	// Provide the vault Bearer token but no session cookie.
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("vault Bearer token on admin route: expected 401, got %d", w.Code)
+	}
+	if handlerCalled {
+		t.Error("admin handler must not be called when only a vault Bearer token is present")
+	}
+}
+
+// TestAuthMiddleware_VaultIsolation verifies that a key scoped to one vault
+// cannot be used to access a different vault.
+func TestAuthMiddleware_VaultIsolation(t *testing.T) {
+	s := newTestStore(t)
+	// Configure two vaults
+	s.SetVaultConfig(auth.VaultConfig{Name: "vault-a", Public: false})
+	s.SetVaultConfig(auth.VaultConfig{Name: "vault-b", Public: false})
+
+	// Generate key scoped to vault-a only
+	token, _, err := s.GenerateAPIKey("vault-a", "agent", "full", nil)
+	if err != nil {
+		t.Fatalf("GenerateAPIKey: %v", err)
+	}
+
+	handler := s.VaultAuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Key for vault-a should NOT work for vault-b
+	req := httptest.NewRequest("GET", "/api/engrams?vault=vault-b", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("key for vault-a accessing vault-b: expected 401, got %d", w.Code)
+	}
+}

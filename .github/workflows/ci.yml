@@ -236,9 +236,10 @@ jobs:
           ./muninndb-server --daemon --data /tmp/muninn-ci-data &
           echo "SERVER_PID=$!" >> $GITHUB_ENV
 
-          # Wait up to 15s for the MCP health endpoint (public, no auth required).
+          # Wait up to 15s for both listeners: MCP (8750) and REST API (8476).
           for i in $(seq 1 15); do
-            if curl -sf http://localhost:8750/mcp/health > /dev/null 2>&1; then
+            if curl -sf http://localhost:8750/mcp/health > /dev/null 2>&1 && \
+               curl -sf http://localhost:8476/api/health > /dev/null 2>&1; then
               echo "MuninnDB ready after ${i}s"
               break
             fi
@@ -246,6 +247,7 @@ jobs:
           done
 
           curl -sf http://localhost:8750/mcp/health
+          curl -sf http://localhost:8476/api/health
 
       - uses: actions/setup-python@v5
         with:
@@ -256,6 +258,9 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r sdk/python/requirements.txt
 
+      - name: Install dev dependencies (pytest)
+        run: pip install pytest pytest-asyncio pytest-timeout
+
       - name: Run SDK smoke test (write + activate)
         working-directory: sdk/python
         run: PYTHONPATH=. python examples/write_activate.py
@@ -263,6 +268,13 @@ jobs:
       - name: Run LangChain integration demo
         working-directory: sdk/python
         run: PYTHONPATH=. python examples/langchain_demo.py
+
+      - name: Run SDK assertion tests
+        working-directory: sdk/python
+        env:
+          MUNINNDB_URL: http://localhost:8476
+          MUNINNDB_TOKEN: ""
+        run: PYTHONPATH=. pytest tests/test_sdk_smoke.py -v --timeout=30
 
       - name: Stop server
         if: always()
@@ -306,10 +318,12 @@ jobs:
           echo "OpenAPI spec paths : $spec_routes"
           echo "server.go handlers : $server_routes"
 
-          # Warn (not fail) if they diverge by more than 5 — exact parity is
-          # unlikely because server.go includes middleware mounts, health
-          # endpoints, and static-file routes that are intentionally omitted
-          # from the public-facing spec.
+          # Warn (not fail) if they diverge by more than 5.
+          # The expected delta is ~5: server.go registers multiple HTTP methods
+          # on the same path (e.g. GET + PUT on /api/admin/plugin-config),
+          # so HandleFunc count > unique path count. All unique paths are
+          # represented in the spec; the surplus HandleFuncs are extra methods
+          # on already-documented paths.
           diff=$((server_routes - spec_routes))
           abs_diff=${diff#-}
           if [ "$abs_diff" -gt 5 ]; then

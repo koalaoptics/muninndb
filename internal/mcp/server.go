@@ -26,8 +26,18 @@ type MCPServer struct {
 	srv       *http.Server
 	tlsConfig *tls.Config // nil = plain TCP
 
-	sseSessionsMu sync.Mutex
-	sseSessions   map[string]*sseSession // sessionID → session
+	sseSessionsMu    sync.Mutex
+	sseSessions      map[string]*sseSession // sessionID → session
+	idempotencyLocks sync.Map               // per-op_id mutex for idempotent remember
+}
+
+// getIdempotencyLock returns (or lazily creates) a per-op_id mutex. This is
+// used by handleRemember to prevent TOCTOU races when two concurrent requests
+// arrive with the same op_id: only one goroutine at a time can execute the
+// check→write→store-receipt flow for a given op_id.
+func (s *MCPServer) getIdempotencyLock(opID string) *sync.Mutex {
+	m, _ := s.idempotencyLocks.LoadOrStore(opID, &sync.Mutex{})
+	return m.(*sync.Mutex)
 }
 
 type sseSession struct {
@@ -194,6 +204,44 @@ func (s *MCPServer) dispatchToolCall(ctx context.Context, w http.ResponseWriter,
 		"muninn_list_deleted": s.handleListDeleted,
 		"muninn_retry_enrich": s.handleRetryEnrich,
 		"muninn_guide":        s.handleGuide,
+		// Hierarchical memory tools
+		"muninn_where_left_off": s.handleWhereLeftOff,
+
+		"muninn_remember_tree": s.handleRememberTree,
+		"muninn_recall_tree":   s.handleRecallTree,
+		"muninn_add_child":     s.handleAddChild,
+
+		// Entity reverse index
+		"muninn_find_by_entity": s.handleFindByEntity,
+
+		// Entity lifecycle state
+		"muninn_entity_state": s.handleEntityState,
+
+		// Entity cluster detection
+		"muninn_entity_clusters": s.handleEntityClusters,
+
+		// Knowledge graph export
+		"muninn_export_graph": s.handleExportGraph,
+
+		// Entity similarity detection and merge
+		"muninn_similar_entities": s.handleSimilarEntities,
+		"muninn_merge_entity":     s.handleMergeEntity,
+
+		// Entity timeline
+		"muninn_entity_timeline": s.handleEntityTimeline,
+
+		// Enrichment replay
+		"muninn_replay_enrichment": s.handleReplayEnrichment,
+
+		// Provenance audit trail
+		"muninn_provenance": s.handleProvenance,
+
+		// SGD learning loop feedback
+		"muninn_feedback": s.handleFeedback,
+
+		// Entity aggregate view
+		"muninn_entity":   s.handleEntity,
+		"muninn_entities": s.handleEntities,
 	}
 
 	handler, found := handlers[req.Params.Name]

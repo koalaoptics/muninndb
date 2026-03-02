@@ -144,7 +144,7 @@ type EngramItem struct {
 	Confidence float32  `json:"confidence"`
 	Tags       []string `json:"tags,omitempty"`
 	Vault      string   `json:"vault"`
-	CreatedAt  int64    `json:"createdAt"`
+	CreatedAt  int64    `json:"created_at"`
 	// EmbedDim is the stored embedding dimensionality code (0 = no embedding).
 	// 1 = 384-dim, 2 = 768-dim, 3 = 1536-dim.
 	EmbedDim uint8 `json:"embed_dim,omitempty"`
@@ -174,8 +174,8 @@ type ListEngramsResponse struct {
 
 // AssociationItem is a graph edge for the UI.
 type AssociationItem struct {
-	TargetID string  `json:"targetId"`
-	RelType  uint16  `json:"relType"`
+	TargetID string  `json:"target_id"`
+	RelType  uint16  `json:"rel_type"`
 	Weight   float32 `json:"weight"`
 }
 
@@ -203,7 +203,7 @@ type SessionItem struct {
 	ID        string `json:"id"`
 	Concept   string `json:"concept"`
 	Content   string `json:"content"`
-	CreatedAt int64  `json:"createdAt"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 // GetSessionResponse returns session timeline entries.
@@ -257,11 +257,12 @@ type RestoreResponse struct {
 
 // TraverseRequest is the body for POST /api/traverse.
 type TraverseRequest struct {
-	Vault    string   `json:"vault"`
-	StartID  string   `json:"start_id"`
-	MaxHops  int      `json:"max_hops,omitempty"`
-	MaxNodes int      `json:"max_nodes,omitempty"`
-	RelTypes []string `json:"rel_types,omitempty"`
+	Vault           string   `json:"vault"`
+	StartID         string   `json:"start_id"`
+	MaxHops         int      `json:"max_hops,omitempty"`
+	MaxNodes        int      `json:"max_nodes,omitempty"`
+	RelTypes        []string `json:"rel_types,omitempty"`
+	FollowEntities  bool     `json:"follow_entities,omitempty"`
 }
 
 // TraversalNode is a single node in a graph traversal result.

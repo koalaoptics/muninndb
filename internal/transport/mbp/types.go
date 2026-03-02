@@ -16,39 +16,39 @@ type RelType uint16
 
 // Association represents a directed link between two engrams
 type Association struct {
-	TargetID      string
-	RelType       uint16
-	Weight        float32
-	Confidence    float32
-	CreatedAt     int64
-	LastActivated int32
+	TargetID      string  `msgpack:"target_id" json:"target_id"`
+	RelType       uint16  `msgpack:"rel_type" json:"rel_type"`
+	Weight        float32 `msgpack:"weight" json:"weight"`
+	Confidence    float32 `msgpack:"confidence" json:"confidence"`
+	CreatedAt     int64   `msgpack:"created_at" json:"created_at"`
+	LastActivated int32   `msgpack:"last_activated" json:"last_activated"`
 }
 
 // HelloRequest is the HELLO handshake payload.
 type HelloRequest struct {
-	Version      string   `msgpack:"version"`
-	AuthMethod   string   `msgpack:"auth_method"`
-	Token        string   `msgpack:"token,omitempty"`
-	Vault        string   `msgpack:"vault,omitempty"`
-	Client       string   `msgpack:"client,omitempty"`
-	Capabilities []string `msgpack:"capabilities,omitempty"`
+	Version      string   `msgpack:"version" json:"version"`
+	AuthMethod   string   `msgpack:"auth_method" json:"auth_method"`
+	Token        string   `msgpack:"token,omitempty" json:"token,omitempty"`
+	Vault        string   `msgpack:"vault,omitempty" json:"vault,omitempty"`
+	Client       string   `msgpack:"client,omitempty" json:"client,omitempty"`
+	Capabilities []string `msgpack:"capabilities,omitempty" json:"capabilities,omitempty"`
 }
 
 // HelloResponse is the HELLO_OK response payload.
 type HelloResponse struct {
-	ServerVersion string   `msgpack:"server_version"`
-	SessionID     string   `msgpack:"session_id"`
-	VaultID       string   `msgpack:"vault_id"`
-	Capabilities  []string `msgpack:"capabilities"`
-	Limits        Limits   `msgpack:"limits"`
+	ServerVersion string   `msgpack:"server_version" json:"server_version"`
+	SessionID     string   `msgpack:"session_id" json:"session_id"`
+	VaultID       string   `msgpack:"vault_id" json:"vault_id"`
+	Capabilities  []string `msgpack:"capabilities" json:"capabilities"`
+	Limits        Limits   `msgpack:"limits" json:"limits"`
 }
 
 // Limits defines the server's operational constraints.
 type Limits struct {
-	MaxResults   int `msgpack:"max_results"`
-	MaxHopDepth  int `msgpack:"max_hop_depth"`
-	MaxRate      int `msgpack:"max_rate"`
-	MaxPayloadMB int `msgpack:"max_payload_mb"`
+	MaxResults   int `msgpack:"max_results" json:"max_results"`
+	MaxHopDepth  int `msgpack:"max_hop_depth" json:"max_hop_depth"`
+	MaxRate      int `msgpack:"max_rate" json:"max_rate"`
+	MaxPayloadMB int `msgpack:"max_payload_mb" json:"max_payload_mb"`
 }
 
 // InlineEntity is a caller-provided entity for inline enrichment.
@@ -64,58 +64,68 @@ type InlineRelationship struct {
 	Weight   float32 `msgpack:"weight" json:"weight"`
 }
 
+// InlineEntityRelationship is a caller-provided typed entity-to-entity relationship.
+// Stored as a RelationshipRecord in the 0x21 entity relationship index.
+type InlineEntityRelationship struct {
+	FromEntity string  `msgpack:"from_entity" json:"from_entity"`
+	ToEntity   string  `msgpack:"to_entity" json:"to_entity"`
+	RelType    string  `msgpack:"rel_type" json:"rel_type"`
+	Weight     float32 `msgpack:"weight" json:"weight"`
+}
+
 // WriteRequest stores a new engram.
 type WriteRequest struct {
-	Concept      string        `msgpack:"concept"`
-	Content      string        `msgpack:"content"`
-	Tags         []string      `msgpack:"tags,omitempty"`
-	Confidence   float32       `msgpack:"confidence,omitempty"`
-	Stability    float32       `msgpack:"stability,omitempty"`
-	CreatedAt    *time.Time    `msgpack:"created_at,omitempty"`
-	Associations []Association `msgpack:"associations,omitempty"`
-	Embedding    []float32     `msgpack:"embedding,omitempty"`
-	Vault        string        `msgpack:"vault,omitempty"`
-	IdempotentID string        `msgpack:"idempotent_id,omitempty"`
-	MemoryType   uint8         `msgpack:"memory_type,omitempty"`
-	TypeLabel    string        `msgpack:"type_label,omitempty"`
+	Concept      string        `msgpack:"concept" json:"concept"`
+	Content      string        `msgpack:"content" json:"content"`
+	Tags         []string      `msgpack:"tags,omitempty" json:"tags,omitempty"`
+	Confidence   float32       `msgpack:"confidence,omitempty" json:"confidence,omitempty"`
+	Stability    float32       `msgpack:"stability,omitempty" json:"stability,omitempty"`
+	CreatedAt    *time.Time    `msgpack:"created_at,omitempty" json:"created_at,omitempty"`
+	Associations []Association `msgpack:"associations,omitempty" json:"associations,omitempty"`
+	Embedding    []float32     `msgpack:"embedding,omitempty" json:"embedding,omitempty"`
+	Vault        string        `msgpack:"vault,omitempty" json:"vault,omitempty"`
+	IdempotentID string        `msgpack:"idempotent_id,omitempty" json:"idempotent_id,omitempty"`
+	MemoryType   uint8         `msgpack:"memory_type,omitempty" json:"memory_type,omitempty"`
+	TypeLabel    string        `msgpack:"type_label,omitempty" json:"type_label,omitempty"`
 
 	// Inline enrichment: caller-provided data that bypasses background enrichment.
-	Summary       string               `msgpack:"summary,omitempty"`
-	Entities      []InlineEntity        `msgpack:"entities,omitempty"`
-	Relationships []InlineRelationship  `msgpack:"relationships,omitempty"`
+	Summary             string                     `msgpack:"summary,omitempty" json:"summary,omitempty"`
+	Entities            []InlineEntity             `msgpack:"entities,omitempty" json:"entities,omitempty"`
+	Relationships       []InlineRelationship       `msgpack:"relationships,omitempty" json:"relationships,omitempty"`
+	EntityRelationships []InlineEntityRelationship `msgpack:"entity_relationships,omitempty" json:"entity_relationships,omitempty"`
 }
 
 // WriteResponse confirms a write and returns the assigned ULID.
 type WriteResponse struct {
-	ID        string `msgpack:"id"`
-	CreatedAt int64  `msgpack:"created_at"`
+	ID        string `msgpack:"id"         json:"id"`
+	CreatedAt int64  `msgpack:"created_at" json:"created_at"`
 }
 
 // ReadRequest retrieves an engram by ID.
 type ReadRequest struct {
-	ID    string `msgpack:"id"`
-	Vault string `msgpack:"vault,omitempty"`
+	ID    string `msgpack:"id" json:"id"`
+	Vault string `msgpack:"vault,omitempty" json:"vault,omitempty"`
 }
 
 // ReadResponse returns the full engram data.
 type ReadResponse struct {
-	ID             string   `msgpack:"id"`
-	Concept        string   `msgpack:"concept"`
-	Content        string   `msgpack:"content"`
-	Confidence     float32  `msgpack:"confidence"`
-	Relevance      float32  `msgpack:"relevance"`
-	Stability      float32  `msgpack:"stability"`
-	AccessCount    uint32   `msgpack:"access_count"`
-	Tags           []string `msgpack:"tags,omitempty"`
-	State          uint8    `msgpack:"state"`
-	CreatedAt      int64    `msgpack:"created_at"`
-	UpdatedAt      int64    `msgpack:"updated_at"`
-	LastAccess     int64    `msgpack:"last_access"`
-	Summary        string   `msgpack:"summary,omitempty"`
-	KeyPoints      []string `msgpack:"key_points,omitempty"`
-	MemoryType     uint8    `msgpack:"memory_type,omitempty"`
-	TypeLabel      string   `msgpack:"type_label,omitempty"`
-	Classification uint16   `msgpack:"classification,omitempty"`
+	ID             string   `msgpack:"id"                    json:"id"`
+	Concept        string   `msgpack:"concept"               json:"concept"`
+	Content        string   `msgpack:"content"               json:"content"`
+	Confidence     float32  `msgpack:"confidence"            json:"confidence"`
+	Relevance      float32  `msgpack:"relevance"             json:"relevance"`
+	Stability      float32  `msgpack:"stability"             json:"stability"`
+	AccessCount    uint32   `msgpack:"access_count"          json:"access_count"`
+	Tags           []string `msgpack:"tags,omitempty"        json:"tags,omitempty"`
+	State          uint8    `msgpack:"state"                 json:"state"`
+	CreatedAt      int64    `msgpack:"created_at"            json:"created_at"`
+	UpdatedAt      int64    `msgpack:"updated_at"            json:"updated_at"`
+	LastAccess     int64    `msgpack:"last_access"           json:"last_access"`
+	Summary        string   `msgpack:"summary,omitempty"     json:"summary,omitempty"`
+	KeyPoints      []string `msgpack:"key_points,omitempty"  json:"key_points,omitempty"`
+	MemoryType     uint8    `msgpack:"memory_type,omitempty" json:"memory_type,omitempty"`
+	TypeLabel      string   `msgpack:"type_label,omitempty"  json:"type_label,omitempty"`
+	Classification uint16   `msgpack:"classification,omitempty" json:"classification,omitempty"`
 	// EmbedDim is the stored embedding dimensionality code (0 = no embedding).
 	// 1 = 384-dim, 2 = 768-dim, 3 = 1536-dim.
 	EmbedDim uint8 `msgpack:"embed_dim,omitempty" json:"embed_dim,omitempty"`
@@ -123,48 +133,48 @@ type ReadResponse struct {
 
 // ActivateRequest queries for relevant engrams.
 type ActivateRequest struct {
-	Context     []string  `msgpack:"context"`
-	Threshold   float32   `msgpack:"threshold,omitempty"`
-	MaxResults  int       `msgpack:"max_results,omitempty"`
-	MaxHops     int       `msgpack:"max_hops,omitempty"`
-	IncludeWhy  bool      `msgpack:"include_why,omitempty"`
-	Weights     *Weights  `msgpack:"weights,omitempty"`
-	Filters     []Filter  `msgpack:"filters,omitempty"`
-	Vault       string    `msgpack:"vault,omitempty"`
-	Embedding   []float32 `msgpack:"embedding,omitempty"`
-	BriefMode   string    `msgpack:"brief_mode,omitempty"`                       // "extractive"|"llm"|"auto"|"" (default: "auto")
-	DisableHops bool      `msgpack:"disable_hops,omitempty"`                     // when true, override default hop traversal to 0
-	Profile     string    `json:"profile,omitempty" msgpack:"profile,omitempty"` // traversal profile override: ""|"default"|"causal"|"confirmatory"|"adversarial"|"structural"
-	Mode        string    `json:"mode,omitempty" msgpack:"mode,omitempty"`       // recall mode preset: "semantic"|"recent"|"balanced"|"deep"
+	Context     []string  `msgpack:"context" json:"context"`
+	Threshold   float32   `msgpack:"threshold,omitempty" json:"threshold,omitempty"`
+	MaxResults  int       `msgpack:"max_results,omitempty" json:"max_results,omitempty"`
+	MaxHops     int       `msgpack:"max_hops,omitempty" json:"max_hops,omitempty"`
+	IncludeWhy  bool      `msgpack:"include_why,omitempty" json:"include_why,omitempty"`
+	Weights     *Weights  `msgpack:"weights,omitempty" json:"weights,omitempty"`
+	Filters     []Filter  `msgpack:"filters,omitempty" json:"filters,omitempty"`
+	Vault       string    `msgpack:"vault,omitempty" json:"vault,omitempty"`
+	Embedding   []float32 `msgpack:"embedding,omitempty" json:"embedding,omitempty"`
+	BriefMode   string    `msgpack:"brief_mode,omitempty" json:"brief_mode,omitempty"`                       // "extractive"|"llm"|"auto"|"" (default: "auto")
+	DisableHops bool      `msgpack:"disable_hops,omitempty" json:"disable_hops,omitempty"`                   // when true, override default hop traversal to 0
+	Profile     string    `json:"profile,omitempty" msgpack:"profile,omitempty"`                             // traversal profile override: ""|"default"|"causal"|"confirmatory"|"adversarial"|"structural"
+	Mode        string    `json:"mode,omitempty" msgpack:"mode,omitempty"`                                   // recall mode preset: "semantic"|"recent"|"balanced"|"deep"
 }
 
 // Weights defines scoring weight distribution.
 type Weights struct {
-	SemanticSimilarity float32 `msgpack:"semantic_similarity"`
-	FullTextRelevance  float32 `msgpack:"full_text_relevance"`
-	DecayFactor        float32 `msgpack:"decay_factor"`
-	HebbianBoost       float32 `msgpack:"hebbian_boost"`
-	AccessFrequency    float32 `msgpack:"access_frequency"`
-	Recency            float32 `msgpack:"recency"`
+	SemanticSimilarity float32 `msgpack:"semantic_similarity" json:"semantic_similarity"`
+	FullTextRelevance  float32 `msgpack:"full_text_relevance" json:"full_text_relevance"`
+	DecayFactor        float32 `msgpack:"decay_factor" json:"decay_factor"`
+	HebbianBoost       float32 `msgpack:"hebbian_boost" json:"hebbian_boost"`
+	AccessFrequency    float32 `msgpack:"access_frequency" json:"access_frequency"`
+	Recency            float32 `msgpack:"recency" json:"recency"`
 	// CGDN: Cognitive-Gated Divisive Normalization (Carandini & Heeger 2012).
 	// When UseCGDN=true, replaces additive weighted sum with multiplicative
 	// cognitive gating and divisive normalization across all candidates.
-	UseCGDN   bool    `msgpack:"use_cgdn,omitempty"`
-	CGDNAlpha float32 `msgpack:"cgdn_alpha,omitempty"` // Ebbinghaus gate exponent (default 1.5)
-	CGDNBeta  float32 `msgpack:"cgdn_beta,omitempty"`  // Hebbian gate exponent (default 0.5)
-	CGDNPower float32 `msgpack:"cgdn_power,omitempty"` // divisive normalization power (default 2.0)
+	UseCGDN   bool    `msgpack:"use_cgdn,omitempty" json:"use_cgdn,omitempty"`
+	CGDNAlpha float32 `msgpack:"cgdn_alpha,omitempty" json:"cgdn_alpha,omitempty"` // Ebbinghaus gate exponent (default 1.5)
+	CGDNBeta  float32 `msgpack:"cgdn_beta,omitempty" json:"cgdn_beta,omitempty"`   // Hebbian gate exponent (default 0.5)
+	CGDNPower float32 `msgpack:"cgdn_power,omitempty" json:"cgdn_power,omitempty"` // divisive normalization power (default 2.0)
 	// ACT-R: total recall mode. Score = ContentMatch × softplus(B(M) + scale×Hebbian).
-	UseACTR      bool    `msgpack:"use_actr,omitempty"`
-	ACTRDecay    float32 `msgpack:"actr_decay,omitempty"`      // power-law exponent d (default 0.5)
-	ACTRHebScale float32 `msgpack:"actr_heb_scale,omitempty"`  // Hebbian amplifier (default 4.0)
-	DisableACTR  bool    `msgpack:"disable_actr,omitempty" json:"disable_actr,omitempty"` // when true, use legacy weighted-sum scoring instead of ACT-R
+	UseACTR      bool    `msgpack:"use_actr,omitempty" json:"use_actr,omitempty"`
+	ACTRDecay    float32 `msgpack:"actr_decay,omitempty" json:"actr_decay,omitempty"`           // power-law exponent d (default 0.5)
+	ACTRHebScale float32 `msgpack:"actr_heb_scale,omitempty" json:"actr_heb_scale,omitempty"`   // Hebbian amplifier (default 4.0)
+	DisableACTR  bool    `msgpack:"disable_actr,omitempty" json:"disable_actr,omitempty"`       // when true, use legacy weighted-sum scoring instead of ACT-R
 }
 
 // Filter restricts activation results.
 type Filter struct {
-	Field string      `msgpack:"field"`
-	Op    string      `msgpack:"op"`
-	Value interface{} `msgpack:"value"`
+	Field string      `msgpack:"field" json:"field"`
+	Op    string      `msgpack:"op" json:"op"`
+	Value interface{} `msgpack:"value" json:"value"`
 }
 
 // BriefSentence is a single sentence from the activation brief.
@@ -176,107 +186,107 @@ type BriefSentence struct {
 
 // ActivateResponse returns activation results (may be multi-frame).
 type ActivateResponse struct {
-	QueryID     string           `msgpack:"query_id"`
-	TotalFound  int              `msgpack:"total_found"`
-	Activations []ActivationItem `msgpack:"activations"`
-	LatencyMs   float64          `msgpack:"latency_ms,omitempty"`
-	Frame       int              `msgpack:"frame,omitempty"`
-	TotalFrames int              `msgpack:"total_frames,omitempty"`
-	Brief       []BriefSentence  `msgpack:"brief,omitempty" json:"brief,omitempty"` // extractive activation brief
+	QueryID     string           `msgpack:"query_id"               json:"query_id"`
+	TotalFound  int              `msgpack:"total_found"            json:"total_found"`
+	Activations []ActivationItem `msgpack:"activations"            json:"activations"`
+	LatencyMs   float64          `msgpack:"latency_ms,omitempty"   json:"latency_ms,omitempty"`
+	Frame       int              `msgpack:"frame,omitempty"        json:"frame,omitempty"`
+	TotalFrames int              `msgpack:"total_frames,omitempty" json:"total_frames,omitempty"`
+	Brief       []BriefSentence  `msgpack:"brief,omitempty"        json:"brief,omitempty"` // extractive activation brief
 }
 
 // ActivationItem is a single activated engram.
 type ActivationItem struct {
-	ID              string          `msgpack:"id"`
-	Concept         string          `msgpack:"concept"`
-	Content         string          `msgpack:"content"`
-	Score           float32         `msgpack:"score"`
-	Confidence      float32         `msgpack:"confidence"`
-	ScoreComponents ScoreComponents `msgpack:"score_components,omitempty"`
-	Why             string          `msgpack:"why,omitempty"`
-	HopPath         []string        `msgpack:"hop_path,omitempty"`
-	Dormant         bool            `msgpack:"dormant,omitempty"`
+	ID              string          `msgpack:"id"                          json:"id"`
+	Concept         string          `msgpack:"concept"                     json:"concept"`
+	Content         string          `msgpack:"content"                     json:"content"`
+	Score           float32         `msgpack:"score"                       json:"score"`
+	Confidence      float32         `msgpack:"confidence"                  json:"confidence"`
+	ScoreComponents ScoreComponents `msgpack:"score_components,omitempty"  json:"score_components,omitempty"`
+	Why             string          `msgpack:"why,omitempty"               json:"why,omitempty"`
+	HopPath         []string        `msgpack:"hop_path,omitempty"          json:"hop_path,omitempty"`
+	Dormant         bool            `msgpack:"dormant,omitempty"           json:"dormant,omitempty"`
 }
 
 // ScoreComponents breaks down the activation score.
 type ScoreComponents struct {
-	SemanticSimilarity float32 `msgpack:"semantic_similarity"`
-	FullTextRelevance  float32 `msgpack:"full_text_relevance"`
-	DecayFactor        float32 `msgpack:"decay_factor"`
-	HebbianBoost       float32 `msgpack:"hebbian_boost"`
-	TransitionBoost    float32 `msgpack:"transition_boost,omitempty"`
-	AccessFrequency    float32 `msgpack:"access_frequency"`
-	Recency            float32 `msgpack:"recency"`
-	Raw                float32 `msgpack:"raw"`
-	Final              float32 `msgpack:"final"`
+	SemanticSimilarity float32 `msgpack:"semantic_similarity"           json:"semantic_similarity"`
+	FullTextRelevance  float32 `msgpack:"full_text_relevance"           json:"full_text_relevance"`
+	DecayFactor        float32 `msgpack:"decay_factor"                  json:"decay_factor"`
+	HebbianBoost       float32 `msgpack:"hebbian_boost"                 json:"hebbian_boost"`
+	TransitionBoost    float32 `msgpack:"transition_boost,omitempty"    json:"transition_boost,omitempty"`
+	AccessFrequency    float32 `msgpack:"access_frequency"              json:"access_frequency"`
+	Recency            float32 `msgpack:"recency"                       json:"recency"`
+	Raw                float32 `msgpack:"raw"                           json:"raw"`
+	Final              float32 `msgpack:"final"                         json:"final"`
 }
 
 // SubscribeRequest registers a context subscription.
 type SubscribeRequest struct {
-	SubscriptionID string   `msgpack:"subscription_id,omitempty"`
-	Context        []string `msgpack:"context"`
-	Threshold      float32  `msgpack:"threshold,omitempty"`
-	Vault          string   `msgpack:"vault,omitempty"`
-	TTL            int      `msgpack:"ttl,omitempty"`
-	RateLimit      int      `msgpack:"rate_limit,omitempty"`
-	PushOnWrite    bool     `msgpack:"push_on_write,omitempty"`
-	DeltaThreshold float32  `msgpack:"delta_threshold,omitempty"`
+	SubscriptionID string   `msgpack:"subscription_id,omitempty" json:"subscription_id,omitempty"`
+	Context        []string `msgpack:"context" json:"context"`
+	Threshold      float32  `msgpack:"threshold,omitempty" json:"threshold,omitempty"`
+	Vault          string   `msgpack:"vault,omitempty" json:"vault,omitempty"`
+	TTL            int      `msgpack:"ttl,omitempty" json:"ttl,omitempty"`
+	RateLimit      int      `msgpack:"rate_limit,omitempty" json:"rate_limit,omitempty"`
+	PushOnWrite    bool     `msgpack:"push_on_write,omitempty" json:"push_on_write,omitempty"`
+	DeltaThreshold float32  `msgpack:"delta_threshold,omitempty" json:"delta_threshold,omitempty"`
 }
 
 // SubscribeResponse confirms subscription creation.
 type SubscribeResponse struct {
-	SubID  string `msgpack:"sub_id"`
-	Status string `msgpack:"status"`
+	SubID  string `msgpack:"sub_id" json:"sub_id"`
+	Status string `msgpack:"status" json:"status"`
 }
 
 // ActivationPush is an unsolicited server push.
 type ActivationPush struct {
-	SubscriptionID string         `msgpack:"subscription_id"`
-	Activation     ActivationItem `msgpack:"activation"`
-	Trigger        string         `msgpack:"trigger"`
-	PushNumber     int            `msgpack:"push_number"`
-	At             int64          `msgpack:"at"`
+	SubscriptionID string         `msgpack:"subscription_id" json:"subscription_id"`
+	Activation     ActivationItem `msgpack:"activation" json:"activation"`
+	Trigger        string         `msgpack:"trigger" json:"trigger"`
+	PushNumber     int            `msgpack:"push_number" json:"push_number"`
+	At             int64          `msgpack:"at" json:"at"`
 }
 
 // UnsubscribeRequest cancels a subscription.
 type UnsubscribeRequest struct {
-	SubID string `msgpack:"sub_id"`
+	SubID string `msgpack:"sub_id" json:"sub_id"`
 }
 
 // UnsubscribeResponse confirms unsubscription.
 type UnsubscribeResponse struct {
-	OK bool `msgpack:"ok"`
+	OK bool `msgpack:"ok" json:"ok"`
 }
 
 // LinkRequest creates/updates an association.
 type LinkRequest struct {
-	SourceID string  `msgpack:"source_id"`
-	TargetID string  `msgpack:"target_id"`
-	RelType  uint16  `msgpack:"rel_type"`
-	Weight   float32 `msgpack:"weight,omitempty"`
-	Vault    string  `msgpack:"vault,omitempty"`
+	SourceID string  `msgpack:"source_id" json:"source_id"`
+	TargetID string  `msgpack:"target_id" json:"target_id"`
+	RelType  uint16  `msgpack:"rel_type" json:"rel_type"`
+	Weight   float32 `msgpack:"weight,omitempty" json:"weight,omitempty"`
+	Vault    string  `msgpack:"vault,omitempty" json:"vault,omitempty"`
 }
 
 // LinkResponse confirms association.
 type LinkResponse struct {
-	OK bool `msgpack:"ok"`
+	OK bool `msgpack:"ok" json:"ok"`
 }
 
 // ForgetRequest soft-deletes an engram.
 type ForgetRequest struct {
-	ID    string `msgpack:"id"`
-	Hard  bool   `msgpack:"hard,omitempty"`
-	Vault string `msgpack:"vault,omitempty"`
+	ID    string `msgpack:"id" json:"id"`
+	Hard  bool   `msgpack:"hard,omitempty" json:"hard,omitempty"`
+	Vault string `msgpack:"vault,omitempty" json:"vault,omitempty"`
 }
 
 // ForgetResponse confirms deletion.
 type ForgetResponse struct {
-	OK bool `msgpack:"ok"`
+	OK bool `msgpack:"ok" json:"ok"`
 }
 
 // StatRequest queries database statistics.
 type StatRequest struct {
-	Vault string `msgpack:"vault,omitempty"`
+	Vault string `msgpack:"vault,omitempty" json:"vault,omitempty"`
 }
 
 // CoherenceResult holds coherence metrics for a single vault.
@@ -291,19 +301,19 @@ type CoherenceResult struct {
 
 // StatResponse returns database stats.
 type StatResponse struct {
-	EngramCount     int64                      `msgpack:"engram_count"    json:"engramCount"`
-	VaultCount      int                        `msgpack:"vault_count"     json:"vaultCount"`
-	IndexSize       int64                      `msgpack:"index_size"      json:"indexSize"`
-	StorageBytes    int64                      `msgpack:"storage_bytes"   json:"storageBytes"`
+	EngramCount     int64                      `msgpack:"engram_count"        json:"engram_count"`
+	VaultCount      int                        `msgpack:"vault_count"         json:"vault_count"`
+	IndexSize       int64                      `msgpack:"index_size"          json:"index_size"`
+	StorageBytes    int64                      `msgpack:"storage_bytes"       json:"storage_bytes"`
 	CoherenceScores map[string]CoherenceResult `msgpack:"coherence,omitempty" json:"coherence,omitempty"`
 }
 
 // PingRequest is a keepalive probe.
 type PingRequest struct {
-	Data string `msgpack:"data,omitempty"`
+	Data string `msgpack:"data,omitempty" json:"data,omitempty"`
 }
 
 // PongResponse is a keepalive response.
 type PongResponse struct {
-	Data string `msgpack:"data,omitempty"`
+	Data string `msgpack:"data,omitempty" json:"data,omitempty"`
 }

@@ -28,7 +28,6 @@ func authFromRequest(r *http.Request, requiredToken string) AuthContext {
 // sessionFromRequest looks up a session by the Mcp-Session-Id header.
 // Returns (nil, "") if no header present.
 // Returns (nil, sessionID) if header present but session not found or expired.
-// TODO(task-6): wired in Task 6 — initialize/initialized handlers and dispatchToolCall
 func sessionFromRequest(r *http.Request, store sessionStore) (sess *mcpSession, sessionID string) {
 	sessionID = r.Header.Get(mcpSessionHeader)
 	if sessionID == "" {
@@ -44,7 +43,6 @@ func sessionFromRequest(r *http.Request, store sessionStore) (sess *mcpSession, 
 // validateSessionToken checks that the bearer token matches the session's token hash.
 // Returns an error string if invalid, "" if valid.
 // Precondition: sess must not be nil.
-// TODO(task-6): wired in Task 6 — initialize/initialized handlers and dispatchToolCall
 func validateSessionToken(sess *mcpSession, token string) string {
 	h := sha256.Sum256([]byte(token))
 	if h != sess.tokenHash {

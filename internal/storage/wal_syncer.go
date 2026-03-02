@@ -3,6 +3,7 @@ package storage
 import (
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/pebble"
@@ -18,6 +19,40 @@ const walSyncInterval = 10 * time.Millisecond
 // This is the same trade-off as MySQL innodb_flush_log_at_trx_commit=2 or
 // PostgreSQL synchronous_commit=off, and is safe because Pebble's own WAL
 // provides crash recovery — the LogData sync covers all preceding NoSync writes.
+//
+// Durability contract — which paths use Sync vs NoSync:
+//
+//	pebble.Sync (immediate fsync, zero data loss on crash):
+//	  • WriteEngram (0x01 + 0x02 keys) — primary write path; default behavior
+//	  • WriteAssociation — association forward/reverse keys (0x03/0x04)
+//	  • scoring/Store.Save — vault weight persistence (0x18 key)
+//	  • provenance/Store.Append — audit trail entries
+//	  • auth writes — vault config, API keys
+//	  • migration writes — schema version keys
+//
+//	pebble.NoSync + walSyncer group-commit (≤10ms data loss window):
+//	  • WriteOrdinal / DeleteOrdinal — tree ordinal keys (0x1E)
+//	  • UpdateMetadata — access count, last-access, state transitions
+//	  • UpdateRelevance — relevance/stability score updates
+//	  • SoftDelete / DeleteEngram — lifecycle transitions
+//	  • WriteEntityEngramLink — entity forward/reverse index (0x20/0x23)
+//	  • UpsertEntityRecord — global entity records (0x1F prefix)
+//	  • UpsertRelationshipRecord — entity relationships (0x21)
+//	  • IncrementEntityCoOccurrence — co-occurrence counts (0x24)
+//	  • WriteLastAccessEntry / DeleteLastAccessEntry — 0x22 last-access index
+//	  • WriteIdempotency — op_id receipts
+//	  • WriteVaultName — vault name forward index
+//	  • episodic/Store — all episode and frame writes
+//	  • FTS index updates — keyword search (eventual consistency)
+//
+//	Design rationale:
+//	  The Sync paths cover "primary records" — writes that the caller expects
+//	  to be durable when WriteEngram/WriteAssociation return. The NoSync paths
+//	  cover "derived state" — metadata, indexes, and scores that can be
+//	  reconstructed or tolerate a 10ms rollback without user-visible data loss.
+//	  The walSyncer guarantees that all NoSync writes are durably flushed within
+//	  walSyncInterval (10ms) via LogData(nil, pebble.Sync), providing a bounded
+//	  durability window equivalent to MySQL innodb_flush_log_at_trx_commit=2.
 type walSyncer struct {
 	db   *pebble.DB
 	stop chan struct{}
@@ -36,14 +71,28 @@ func newWALSyncer(db *pebble.DB) *walSyncer {
 
 func (s *walSyncer) run() {
 	defer close(s.done)
-	// Recover from the "pebble: closed" panic that can occur if db.Close()
-	// races with an in-flight ticker sync during shutdown.  Pebble panics with
-	// pebble.ErrClosed (an error value), so we check via errors.Is.
-	// Any other unexpected panic is re-panicked so it is not silently swallowed.
+	// Recover from panics that occur if db.Close() races with an in-flight
+	// ticker sync during shutdown. Pebble can panic in two forms:
+	//   - error: pebble.ErrClosed ("pebble: closed")
+	//   - string: "pebble/record: closed LogWriter" (from the WAL writer internals)
+	// Both are expected during shutdown and are silently swallowed here.
+	// Any other panic is re-panicked so it is not silently swallowed.
 	defer func() {
 		if r := recover(); r != nil {
-			if err, ok := r.(error); ok && errors.Is(err, pebble.ErrClosed) {
-				return // expected during shutdown
+			if err, ok := r.(error); ok {
+				// Catch pebble.ErrClosed ("pebble: closed") and the internal
+				// record.errClosedWriter ("pebble/record: closed LogWriter").
+				// The latter is an unexported error value so we cannot use
+				// errors.Is — match by message substring instead.
+				if errors.Is(err, pebble.ErrClosed) {
+					return // expected during shutdown
+				}
+				if strings.Contains(err.Error(), "closed LogWriter") {
+					return // expected: "pebble/record: closed LogWriter"
+				}
+			}
+			if s, ok := r.(string); ok && strings.Contains(s, "closed") {
+				return // expected: string-form closed panic
 			}
 			panic(r) // unexpected — re-panic
 		}
@@ -55,11 +104,13 @@ func (s *walSyncer) run() {
 		select {
 		case <-ticker.C:
 			if err := s.db.LogData(nil, pebble.Sync); err != nil {
-				slog.Warn("storage: WAL sync failed", "err", err)
+				slog.Error("storage: WAL sync failed", "component", "wal_syncer", "err", err)
 			}
 		case <-s.stop:
 			// Final sync before shutdown.
-			_ = s.db.LogData(nil, pebble.Sync)
+			if err := s.db.LogData(nil, pebble.Sync); err != nil {
+				slog.Error("storage: final WAL sync on shutdown failed", "component", "wal_syncer", "err", err)
+			}
 			return
 		}
 	}

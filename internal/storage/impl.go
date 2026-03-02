@@ -68,7 +68,9 @@ type PebbleStore struct {
 	// All transition reads/writes go through this layer; Pebble is only hit on
 	// cold-start loads and periodic flushes.
 	transCache *TransitionCache
-	closeOnce  sync.Once
+	closeOnce   sync.Once
+	entityLocks       sync.Map // key: normalized entity name → *sync.Mutex
+	coOccurrenceLocks sync.Map // key: "hashA:hashB" → *sync.Mutex
 }
 
 // assocCacheEntry holds a cached association list.
@@ -277,6 +279,11 @@ func (ps *PebbleStore) WriteEngram(ctx context.Context, wsPrefix [8]byte, eng *E
 	// 0x10: relevance bucket key
 	batch.Set(keys.RelevanceBucketKey(wsPrefix, eng.Relevance, [16]byte(eng.ID)), []byte{}, nil)
 
+	// 0x22: LastAccess index — seed with LastAccess (= CreatedAt for new engrams).
+	laMillis := eng.LastAccess.UnixMilli()
+	laKey := keys.LastAccessIndexKey(wsPrefix, laMillis, [16]byte(eng.ID))
+	batch.Set(laKey, nil, nil)
+
 	// Commit — default: one fsync per user-submitted engram (pebble.Sync).
 	// User content is the irreplaceable asset; immediate durability is the
 	// correct tradeoff for a write-light memory store.
@@ -425,6 +432,14 @@ func (ps *PebbleStore) WriteEngramBatch(ctx context.Context, items []EngramBatch
 		}
 		batch.Set(keys.CreatorIndexKey(ws, keys.Hash(eng.CreatedBy), id16), []byte{}, nil)
 		batch.Set(keys.RelevanceBucketKey(ws, eng.Relevance, id16), []byte{}, nil)
+
+		// 0x22: LastAccess index — seed with LastAccess (= CreatedAt for new engrams).
+		laMillis := eng.LastAccess.UnixMilli()
+		laKey := keys.LastAccessIndexKey(ws, laMillis, id16)
+		if err := batch.Set(laKey, nil, nil); err != nil {
+			errs[i] = fmt.Errorf("write engram batch: last access index: %w", err)
+			continue
+		}
 
 		ids[i] = eng.ID
 	}

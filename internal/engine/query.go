@@ -75,8 +75,18 @@ func (e *Engine) ResolveContradiction(ctx context.Context, vault, idA, idB strin
 	return nil
 }
 
+// entityHopWeight is the edge weight assigned to engrams reached via a shared
+// entity link rather than a direct association edge. It is intentionally lower
+// than a typical direct-association weight (0.3–1.0) so that entity-reached
+// neighbours are surfaced but ranked below structurally adjacent memories.
+const entityHopWeight = 0.1
+
 // Traverse performs a bounded BFS from startID, following association edges.
-func (e *Engine) Traverse(ctx context.Context, vault, startID string, maxHops, maxNodes int) ([]TraversalNode, []TraversalEdge, error) {
+// When followEntities is true the BFS additionally traverses through shared
+// entity links: for each engram dequeued at depth d, all entities it mentions
+// are looked up, and every other engram in the same vault that also mentions
+// those entities is enqueued at depth d+1 (with entityHopWeight).
+func (e *Engine) Traverse(ctx context.Context, vault, startID string, maxHops, maxNodes int, followEntities bool) ([]TraversalNode, []TraversalEdge, error) {
 	ws := e.store.ResolveVaultPrefix(vault)
 	start, err := storage.ParseULID(startID)
 	if err != nil {
@@ -106,12 +116,14 @@ func (e *Engine) Traverse(ctx context.Context, vault, startID string, maxHops, m
 			}
 			eng := engrams[i]
 			if eng != nil {
-				nodes = append(nodes, TraversalNode{
-					ID:      eng.ID,
-					Concept: eng.Concept,
-					HopDist: hopMap[src],
-					Summary: eng.Summary,
-				})
+				if eng.State != storage.StateSoftDeleted {
+					nodes = append(nodes, TraversalNode{
+						ID:      eng.ID,
+						Concept: eng.Concept,
+						HopDist: hopMap[src],
+						Summary: eng.Summary,
+					})
+				}
 			}
 			for _, assoc := range assocMap[src] {
 				edges = append(edges, TraversalEdge{From: src, To: assoc.TargetID, Weight: assoc.Weight})
@@ -120,6 +132,25 @@ func (e *Engine) Traverse(ctx context.Context, vault, startID string, maxHops, m
 					hopMap[assoc.TargetID] = hop + 1
 					next = append(next, assoc.TargetID)
 				}
+			}
+
+			// Entity hop: find neighbours reachable via shared entity names.
+			if followEntities && hop < maxHops {
+				_ = e.store.ScanEngramEntities(ctx, ws, src, func(entityName string) error {
+					return e.store.ScanEntityEngrams(ctx, entityName, func(entityWS [8]byte, neighborID storage.ULID) error {
+						if entityWS != ws {
+							return nil // cross-vault — skip
+						}
+						if _, seen := visited[neighborID]; seen {
+							return nil
+						}
+						visited[neighborID] = struct{}{}
+						hopMap[neighborID] = hop + 1
+						next = append(next, neighborID)
+						edges = append(edges, TraversalEdge{From: src, To: neighborID, Weight: entityHopWeight})
+						return nil
+					})
+				})
 			}
 		}
 		queue = next

@@ -441,12 +441,13 @@ func (s *Server) publicBodySizeMiddleware(next http.HandlerFunc) http.HandlerFun
 
 // withMiddleware applies the full chain: observability + body size limit + vault auth.
 // All vault-scoped data routes use this.
+// Admin session cookies bypass vault locking so the Web UI can access any vault.
 // If authStore is nil (e.g. in tests), vault auth is skipped.
 func (s *Server) withMiddleware(handler http.HandlerFunc) http.HandlerFunc {
 	if s.authStore == nil {
 		return s.withPublicMiddleware(s.bodySizeMiddleware(handler))
 	}
-	return s.withPublicMiddleware(s.bodySizeMiddleware(s.authStore.VaultAuthMiddleware(handler)))
+	return s.withPublicMiddleware(s.bodySizeMiddleware(s.authStore.VaultAuthWithAdminBypass(s.sessionSecret, handler)))
 }
 
 // withAdminMiddleware applies observability + body size limit + admin session auth.
@@ -739,7 +740,7 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.engine.Stat(r.Context(), &StatRequest{
-		Vault: r.URL.Query().Get("vault"),
+		Vault: ctxVault(r),
 	})
 	if err != nil {
 		s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, err.Error())
@@ -793,7 +794,9 @@ func ctxVault(r *http.Request) string {
 func (s *Server) sendJSON(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Error("rest: failed to encode response", "err", err)
+	}
 }
 
 func (s *Server) sendError(r *http.Request, w http.ResponseWriter, statusCode int, code ErrorCode, message string) {
@@ -1016,10 +1019,20 @@ func (s *Server) handleListEngrams(w http.ResponseWriter, r *http.Request) {
 
 	var minConf, maxConf float64
 	if v := q.Get("min_confidence"); v != "" {
-		minConf, _ = strconv.ParseFloat(v, 32)
+		parsed, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid min_confidence: %s", v), http.StatusBadRequest)
+			return
+		}
+		minConf = parsed
 	}
 	if v := q.Get("max_confidence"); v != "" {
-		maxConf, _ = strconv.ParseFloat(v, 32)
+		parsed, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid max_confidence: %s", v), http.StatusBadRequest)
+			return
+		}
+		maxConf = parsed
 	}
 
 	since := q.Get("since")
@@ -1067,6 +1080,27 @@ func (s *Server) handleListVaults(w http.ResponseWriter, r *http.Request) {
 		s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, err.Error())
 		return
 	}
+
+	// Merge in vaults that exist in the auth config but haven't had an engram
+	// written yet (or a Hello call pre-fix). This ensures newly created vaults
+	// appear in the dropdown immediately after creation.
+	if s.authStore != nil {
+		cfgs, cfgErr := s.authStore.ListVaultConfigs()
+		if cfgErr == nil {
+			seen := make(map[string]struct{}, len(vaults))
+			for _, v := range vaults {
+				seen[v] = struct{}{}
+			}
+			for _, cfg := range cfgs {
+				if cfg.Name != "" {
+					if _, ok := seen[cfg.Name]; !ok {
+						vaults = append(vaults, cfg.Name)
+					}
+				}
+			}
+		}
+	}
+
 	s.sendJSON(w, http.StatusOK, vaults)
 }
 
