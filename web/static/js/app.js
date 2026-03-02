@@ -8,6 +8,9 @@ document.addEventListener('alpine:init', () => {
     currentView: 'dashboard',
     vault: localStorage.getItem('muninnVault') || 'default',
     vaults: ['default'],
+    vaultPickerOpen: false,
+    sidebarVaultOpen: false,
+    vaultPickerSearch: '',
     isDarkMode: localStorage.getItem('muninnTheme') !== 'light',
     liveConnected: false,
     appVersion: '',
@@ -435,6 +438,14 @@ document.addEventListener('alpine:init', () => {
       this._onViewEnter(this.currentView);
     },
 
+    pickVault(v) {
+      this.vault = v;
+      this.vaultPickerOpen = false;
+      this.sidebarVaultOpen = false;
+      this.vaultPickerSearch = '';
+      this.onVaultChange();
+    },
+
     toggleSidebar() {
       this.sidebarExpanded = !this.sidebarExpanded;
       localStorage.setItem('muninnSidebar', this.sidebarExpanded ? 'expanded' : 'collapsed');
@@ -565,7 +576,7 @@ document.addEventListener('alpine:init', () => {
     async loadVaults() {
       try {
         const data = await this.apiCall('/api/vaults');
-        this.vaults = Array.isArray(data) ? data : ['default'];
+        this.vaults = Array.isArray(data) ? data.slice().sort((a, b) => a.localeCompare(b)) : ['default'];
         if (!this.vaults.includes(this.vault)) {
           this.vault = this.vaults[0] || 'default';
           localStorage.setItem('muninnVault', this.vault);
