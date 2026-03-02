@@ -214,3 +214,90 @@ func TestExportGraph_EmptyVault(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, graphML, `<graphml`)
 }
+
+func TestExportGraph_DeterministicOrder(t *testing.T) {
+	// Write multiple entities and relationships, call ExportGraph twice,
+	// and assert that node and edge ordering is identical both times.
+	eng, cleanup := testEnv(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	vault := "deterministic-test"
+
+	// Write several engrams with different entities to create a diverse graph.
+	entities := []struct {
+		from     string
+		fromType string
+		to       string
+		toType   string
+	}{
+		{"PostgreSQL", "database", "Redis", "cache"},
+		{"Redis", "cache", "Python", "language"},
+		{"Python", "language", "PostgreSQL", "database"},
+		{"Kubernetes", "orchestrator", "Docker", "container"},
+		{"Docker", "container", "Linux", "os"},
+	}
+
+	for _, e := range entities {
+		ws := eng.store.ResolveVaultPrefix(vault)
+		id := storage.ULID{}
+		// Write some relationship records to populate the graph.
+		_ = eng.store.UpsertRelationshipRecord(ctx, ws, id, storage.RelationshipRecord{
+			FromEntity: e.from,
+			ToEntity:   e.to,
+			RelType:    "integrates_with",
+			Weight:     0.8,
+			Source:     "test",
+		})
+		// Also upsert entity records.
+		_ = eng.store.UpsertEntityRecord(ctx, storage.EntityRecord{
+			Name: e.from, Type: e.fromType, Confidence: 1.0,
+		}, "test")
+		_ = eng.store.UpsertEntityRecord(ctx, storage.EntityRecord{
+			Name: e.to, Type: e.toType, Confidence: 1.0,
+		}, "test")
+	}
+
+	// Export graph twice and compare results.
+	g1, err := eng.ExportGraph(ctx, vault, true)
+	require.NoError(t, err)
+
+	g2, err := eng.ExportGraph(ctx, vault, true)
+	require.NoError(t, err)
+
+	// Nodes and edges should be in the same order both times.
+	require.Equal(t, len(g1.Nodes), len(g2.Nodes), "node count mismatch")
+	require.Equal(t, len(g1.Edges), len(g2.Edges), "edge count mismatch")
+
+	for i := range g1.Nodes {
+		require.Equal(t, g1.Nodes[i].ID, g2.Nodes[i].ID, "node ID mismatch at index %d", i)
+		require.Equal(t, g1.Nodes[i].Type, g2.Nodes[i].Type, "node type mismatch at index %d", i)
+	}
+
+	for i := range g1.Edges {
+		require.Equal(t, g1.Edges[i].From, g2.Edges[i].From, "edge From mismatch at index %d", i)
+		require.Equal(t, g1.Edges[i].To, g2.Edges[i].To, "edge To mismatch at index %d", i)
+		require.Equal(t, g1.Edges[i].RelType, g2.Edges[i].RelType, "edge RelType mismatch at index %d", i)
+		require.Equal(t, g1.Edges[i].Weight, g2.Edges[i].Weight, "edge Weight mismatch at index %d", i)
+	}
+
+	// Verify nodes are sorted by ID.
+	for i := 1; i < len(g1.Nodes); i++ {
+		require.Less(t, g1.Nodes[i-1].ID, g1.Nodes[i].ID, "nodes not sorted by ID at index %d", i)
+	}
+
+	// Verify edges are sorted by (From, To, RelType).
+	for i := 1; i < len(g1.Edges); i++ {
+		prev := g1.Edges[i-1]
+		curr := g1.Edges[i]
+		if prev.From == curr.From {
+			if prev.To == curr.To {
+				require.Less(t, prev.RelType, curr.RelType, "edges not sorted by RelType at index %d", i)
+			} else {
+				require.Less(t, prev.To, curr.To, "edges not sorted by To at index %d", i)
+			}
+		} else {
+			require.Less(t, prev.From, curr.From, "edges not sorted by From at index %d", i)
+		}
+	}
+}
