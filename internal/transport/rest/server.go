@@ -1080,6 +1080,27 @@ func (s *Server) handleListVaults(w http.ResponseWriter, r *http.Request) {
 		s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, err.Error())
 		return
 	}
+
+	// Merge in vaults that exist in the auth config but haven't had an engram
+	// written yet (or a Hello call pre-fix). This ensures newly created vaults
+	// appear in the dropdown immediately after creation.
+	if s.authStore != nil {
+		cfgs, cfgErr := s.authStore.ListVaultConfigs()
+		if cfgErr == nil {
+			seen := make(map[string]struct{}, len(vaults))
+			for _, v := range vaults {
+				seen[v] = struct{}{}
+			}
+			for _, cfg := range cfgs {
+				if cfg.Name != "" {
+					if _, ok := seen[cfg.Name]; !ok {
+						vaults = append(vaults, cfg.Name)
+					}
+				}
+			}
+		}
+	}
+
 	s.sendJSON(w, http.StatusOK, vaults)
 }
 
