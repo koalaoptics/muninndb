@@ -261,19 +261,18 @@ func (s *Server) readerLoop(ctx context.Context, conn net.Conn, writeCh chan *Fr
 
 // writerLoop serializes frames to the connection.
 func (s *Server) writerLoop(conn net.Conn, writeCh chan *Frame, errCh chan error) {
-	defer func() {
-		errCh <- nil
-	}()
-
 	bw := bufio.NewWriter(conn)
 	defer bw.Flush()
 
 	for frame := range writeCh {
 		if err := WriteFrame(bw, frame); err != nil {
+			errCh <- err
 			return
 		}
 		bw.Flush()
 	}
+
+	errCh <- nil
 }
 
 // dispatchFrame routes a frame to the appropriate handler.

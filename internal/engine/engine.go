@@ -29,6 +29,7 @@ import (
 	"github.com/scrypster/muninndb/internal/metrics"
 	"github.com/scrypster/muninndb/internal/metrics/latency"
 	"github.com/scrypster/muninndb/internal/plugin"
+	"github.com/scrypster/muninndb/internal/provenance"
 	"github.com/scrypster/muninndb/internal/scoring"
 	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/transport/mbp"
@@ -49,7 +50,63 @@ type Engine struct {
 	activation       *activation.ActivationEngine
 	triggers         *trigger.TriggerSystem
 	engramCount      atomic.Int64
-	cogMu              sync.RWMutex // protects hebbianWorker, contradictWorker, confidenceWorker, transitionWorker
+	// ──────────────────────────────────────────────────────────────────
+	// Cognitive Worker Subsystem
+	// ──────────────────────────────────────────────────────────────────
+	//
+	// Four background workers drive the cognitive pipeline:
+	//
+	//   HebbianWorker          – Hebbian learning: strengthens association
+	//                            weights between co-activated engrams.
+	//   Worker[ContradictItem] – Contradiction detection: flags engrams
+	//                            whose claims conflict with existing knowledge.
+	//   Worker[ConfidenceUpdate] – Confidence decay: adjusts confidence
+	//                              scores over time based on access patterns.
+	//   TransitionWorker       – PAS state transitions: moves engrams
+	//                            through lifecycle states (active → stable
+	//                            → archived) based on scoring signals.
+	//
+	// Hot-Swap Design
+	//
+	// cogMu is an RWMutex that guards all four worker pointers. It exists
+	// because worker assignment changes at runtime during cluster role
+	// transitions. Three operations interact with it:
+	//
+	//   cogWorkers()             – acquires RLock, snapshots all four
+	//                              pointers, releases lock, returns the
+	//                              snapshot. Safe to use after unlock even
+	//                              if a concurrent hot-swap occurs.
+	//   SetCognitiveWorkers()    – called on Cortex promotion (Raft leader
+	//                              election → OnBecameCortex). Acquires
+	//                              write lock, sets all workers, releases.
+	//   ClearCognitiveWorkers()  – called on Lobe demotion (OnBecameLobe).
+	//                              Sets all four pointers to nil under
+	//                              write lock. Lobe nodes perform no local
+	//                              cognitive processing; effects are
+	//                              forwarded to the Cortex.
+	//
+	// Callback Wiring Invariant
+	//
+	// HebbianWorker.OnWeightUpdate is always set BEFORE the worker pointer
+	// is published. In NewEngine, the callback is wired at construction
+	// time. In SetCognitiveWorkers, it is wired before the write lock is
+	// released. This guarantees no concurrent goroutine ever reads a
+	// HebbianWorker reference that lacks its callback.
+	//
+	// Lifecycle Ownership
+	//
+	// The Engine reads worker pointers but does not own their goroutine
+	// lifecycle. In cluster mode, ClusterCoordinator creates and stops
+	// workers; Engine only exposes them. In standalone mode, server.go
+	// creates workers and passes them to NewEngine. transitionWorker is
+	// set separately via SetTransitionWorker() because it follows a
+	// different wiring sequence during cluster promotion.
+	//
+	// Shutdown: Engine.Stop() does NOT stop cognitive workers. Cluster
+	// code (or server.go in standalone) is responsible for calling
+	// hebbianWorker.Stop(), etc. before the process exits.
+	// ──────────────────────────────────────────────────────────────────
+	cogMu              sync.RWMutex
 	hebbianWorker      *cognitive.HebbianWorker
 	contradictWorker   *cognitive.Worker[cognitive.ContradictItem]
 	confidenceWorker   *cognitive.Worker[cognitive.ConfidenceUpdate]
@@ -59,12 +116,14 @@ type Engine struct {
 	// Feature subsystems (all optional, nil-safe)
 	autoAssoc      *autoassoc.Worker    // write-time automatic tag-based associations
 	neighborWorker *autoassoc.NeighborWorker // semantic neighbor auto-linking
+	goalLinkWorker *autoassoc.GoalLinkWorker  // goal-aware semantic auto-linking
 	noveltyDet  *novelty.Detector   // write-time near-duplicate detection
 	noveltyJobs chan noveltyJob      // async novelty work queue
 	noveltyDone chan struct{}        // signals novelty worker shutdown
 	pruneDone   chan struct{}        // signals prune worker shutdown
 	coherence   *coherence.Registry // per-vault incremental coherence counters
 	scoring     *scoring.Store      // per-vault learnable scoring weights
+	prov        *provenance.Store   // audit trail per-engram
 
 	// Fix 5: coherence persistence lifecycle
 	coherenceFlushStop chan struct{}
@@ -88,6 +147,10 @@ type Engine struct {
 	// so Observability() can report their stats. Set via SetRetroactiveProcessors.
 	retroProcessors []*plugin.RetroactiveProcessor
 
+	// enrichPlugin is the optional EnrichPlugin used by ReplayEnrichment.
+	// Set via SetEnrichPlugin after construction.
+	enrichPlugin plugin.EnrichPlugin
+
 	// noveltyJobsDropped counts novelty jobs silently dropped because the channel was full.
 	noveltyJobsDropped atomic.Int64
 
@@ -106,6 +169,10 @@ type Engine struct {
 	// vaultMu provides per-vault mutual exclusion for destructive vault operations
 	// (PruneVault, ReindexFTSVault, ClearVault). Maps string vault name → *sync.Mutex.
 	vaultMu sync.Map
+
+	// childMu serializes the read-modify-write ordinal assignment in AddChild
+	// when Ordinal is nil (append mode). Maps parent ULID string → *sync.Mutex.
+	childMu sync.Map
 }
 
 // SetOnWrite registers a callback invoked after every successful Write.
@@ -138,6 +205,25 @@ func (e *Engine) GetProcessorStats() []plugin.RetroactiveStats {
 	return stats
 }
 
+// GetEnrichmentMode returns a human-readable string describing the active enrichment setup.
+// Returns "none" when no processors are configured, "plugin:<name>" when an enrich plugin
+// is active, or "inline" when only embed processors are registered.
+func (e *Engine) GetEnrichmentMode() string {
+	if len(e.retroProcessors) == 0 {
+		return "none"
+	}
+	for _, p := range e.retroProcessors {
+		if p == nil {
+			continue
+		}
+		stats := p.Stats()
+		if p.Mode() == "enrich" && stats.PluginName != "" && stats.Status != "stopped" {
+			return "plugin:" + stats.PluginName
+		}
+	}
+	return "inline"
+}
+
 // LatencyTracker returns the latency tracker (may be nil).
 func (e *Engine) LatencyTracker() *latency.Tracker {
 	return e.latencyTracker
@@ -154,6 +240,14 @@ func (e *Engine) fastQueryID() string {
 // ClearVault) so concurrent calls on the same vault cannot corrupt state.
 func (e *Engine) getVaultMutex(name string) *sync.Mutex {
 	mu, _ := e.vaultMu.LoadOrStore(name, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
+// getChildMutex returns the per-parent mutex for parentID, creating it if needed.
+// Used to serialize the read-modify-write ordinal assignment in AddChild (append mode)
+// so concurrent appends to the same parent cannot produce duplicate ordinals.
+func (e *Engine) getChildMutex(parentID string) *sync.Mutex {
+	mu, _ := e.childMu.LoadOrStore(parentID, &sync.Mutex{})
 	return mu.(*sync.Mutex)
 }
 
@@ -192,14 +286,16 @@ func NewEngine(
 		confidenceWorker: confidenceWorker,
 		activity:         cognitive.NewActivityTracker(),
 		embedder:         embedder,
-		autoAssoc:        autoassoc.New(store, ftsIdx),
-		neighborWorker:  autoassoc.NewNeighborWorker(store, hnswRegistry),
+		autoAssoc:        autoassoc.New(stopCtx, store, ftsIdx),
+		neighborWorker:  autoassoc.NewNeighborWorker(stopCtx, store, hnswRegistry),
+		goalLinkWorker:  autoassoc.NewGoalLinkWorker(stopCtx, store, hnswRegistry),
 		noveltyDet:       novelty.New(),
 		noveltyJobs:      make(chan noveltyJob, 256),
 		noveltyDone:      make(chan struct{}),
 		pruneDone:        make(chan struct{}),
 		coherence:        coherence.NewRegistry(),
 		scoring:          scoring.NewStore(store.GetDB()),
+		prov:             provenance.NewStore(store.GetDB()),
 		stopCtx:          stopCtx,
 		stopCancel:       stopCancel,
 		hnswRegistry:     hnswRegistry,
@@ -221,6 +317,14 @@ func NewEngine(
 	_ = store.BackfillVaultNames()
 
 	// T1: Wire cognitive callbacks to trigger system.
+	// Initialization order note: HebbianWorker's background goroutine is already running
+	// at this point (it auto-starts inside NewHebbianWorkerWithDB). Setting OnWeightUpdate
+	// here is safe because NewEngine has not returned yet — no caller can enqueue a
+	// CoActivationEvent through the engine API before this assignment completes.
+	// The dynamic Cortex-promotion path (SetCognitiveWorkers) sets the callback before
+	// publishing the worker reference, giving the same guarantee for hot-swap scenarios.
+	// For an even stronger guarantee, pass the callback directly to NewHebbianWorkerWithDB
+	// so it is set before the goroutine starts.
 	if e.hebbianWorker != nil && e.triggers != nil {
 		e.hebbianWorker.OnWeightUpdate = func(ws [8]byte, id [16]byte, field string, old, new float64) {
 			vaultID := wsVaultID(ws)
@@ -298,6 +402,9 @@ func (e *Engine) Stop() {
 			if e.neighborWorker != nil {
 				e.neighborWorker.Stop()
 			}
+		}
+		if e.goalLinkWorker != nil {
+			e.goalLinkWorker.Stop()
 		}
 		// Wait for the prune worker to exit after stopCancel() signalled it.
 		if e.pruneDone != nil {
@@ -489,15 +596,6 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 		eng.Summary = callerSummary
 	}
 
-	// Store caller-provided entities as key points on the engram (written with initial data).
-	if len(callerEntities) > 0 {
-		entityNames := make([]string, 0, len(callerEntities))
-		for _, ent := range callerEntities {
-			entityNames = append(entityNames, ent.Name+" ("+ent.Type+")")
-		}
-		eng.KeyPoints = append(eng.KeyPoints, entityNames...)
-	}
-
 	// Set custom CreatedAt if provided
 	if req.CreatedAt != nil {
 		eng.CreatedAt = *req.CreatedAt
@@ -527,6 +625,48 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 		return nil, fmt.Errorf("write engram: %w", err)
 	}
 
+	// Store caller-provided inline entities in the entity table (not as KeyPoints).
+	if len(callerEntities) > 0 {
+		ws, _ := e.store.FindVaultPrefix(id)
+		var linkedEntityNames []string
+		for _, ent := range callerEntities {
+			record := storage.EntityRecord{
+				Name:       ent.Name,
+				Type:       ent.Type,
+				Confidence: 1.0,
+			}
+			if err := e.store.UpsertEntityRecord(ctx, record, "inline"); err != nil {
+				slog.Warn("engine: failed to store inline entity", "name", ent.Name, "err", err)
+				continue
+			}
+			if err := e.store.WriteEntityEngramLink(ctx, ws, id, ent.Name); err != nil {
+				slog.Warn("engine: failed to link inline entity", "name", ent.Name, "err", err)
+				continue
+			}
+			linkedEntityNames = append(linkedEntityNames, ent.Name)
+		}
+		// Write co-occurrence pairs for entities co-appearing in this engram.
+		for i := 0; i < len(linkedEntityNames); i++ {
+			for j := i + 1; j < len(linkedEntityNames); j++ {
+				if err := e.store.IncrementEntityCoOccurrence(ctx, ws, linkedEntityNames[i], linkedEntityNames[j]); err != nil {
+					slog.Warn("engine: failed to increment co-occurrence", "vault", req.Vault, "engram", id.String(), "entity_a", linkedEntityNames[i], "entity_b", linkedEntityNames[j], "err", err)
+				}
+				if err := e.store.UpsertRelationshipRecord(ctx, ws, id, storage.RelationshipRecord{
+					FromEntity: linkedEntityNames[i],
+					ToEntity:   linkedEntityNames[j],
+					RelType:    "co_occurs_with",
+					Weight:     0.3,
+					Source:     "co-occurrence",
+				}); err != nil {
+					slog.Warn("engine: failed to upsert co_occurs_with relationship", "vault", req.Vault, "engram", id.String(), "entity_a", linkedEntityNames[i], "entity_b", linkedEntityNames[j], "err", err)
+				}
+			}
+		}
+		// Mark entities as caller-provided so the retroactive processor skips extraction.
+		existing, _ := e.store.GetDigestFlags(ctx, plugin.ULID(id))
+		_ = e.store.SetDigestFlag(ctx, id, existing|plugin.DigestEntities)
+	}
+
 	// Create associations from caller-provided relationships (after engram is stored).
 	for _, rel := range callerRelationships {
 		targetULID, parseErr := storage.ParseULID(rel.TargetID)
@@ -546,6 +686,29 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 		}
 	}
 
+	// Store caller-provided entity-to-entity relationships in the 0x21 relationship index.
+	if len(req.EntityRelationships) > 0 {
+		wsER, _ := e.store.FindVaultPrefix(id)
+		for _, er := range req.EntityRelationships {
+			if er.FromEntity == "" || er.ToEntity == "" || er.RelType == "" {
+				continue
+			}
+			weight := er.Weight
+			if weight <= 0 {
+				weight = 0.9
+			}
+			if err := e.store.UpsertRelationshipRecord(ctx, wsER, id, storage.RelationshipRecord{
+				FromEntity: er.FromEntity,
+				ToEntity:   er.ToEntity,
+				RelType:    er.RelType,
+				Weight:     weight,
+				Source:     "inline",
+			}); err != nil {
+				slog.Warn("engine: failed to store entity relationship", "vault", req.Vault, "engram", id.String(), "from", er.FromEntity, "to", er.ToEntity, "rel_type", er.RelType, "err", err)
+			}
+		}
+	}
+
 	// Determine if we should skip background enrichment.
 	// caller_only: skip if any caller data was provided
 	// caller_preferred: the retroactive processor checks per-field (handled there)
@@ -556,13 +719,15 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 	// If we should skip background enrichment, set the DigestEnrich flag now
 	// so the retroactive processor skips this engram.
 	if skipBackgroundEnrich {
-		if flagErr := e.store.SetDigestFlag(ctx, id, 0x04); flagErr != nil {
+		if flagErr := e.store.SetDigestFlag(ctx, id, plugin.DigestEnrich); flagErr != nil {
 			slog.Warn("engine: failed to set enrich digest flag for inline enrichment", "id", id.String(), "error", flagErr)
 		}
 	}
 
 	// Persist vault name for discovery (idempotent, cheap)
-	_ = e.store.WriteVaultName(wsPrefix, vaultName)
+	if err := e.store.WriteVaultName(wsPrefix, vaultName); err != nil {
+		slog.Warn("engine: failed to persist vault name", "vault", vaultName, "err", err)
+	}
 
 	// Submit to async FTS worker — decoupled from write hot path.
 	// Engram is already durable; FTS visibility follows within ~100ms.
@@ -664,6 +829,16 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 		})
 	}
 
+	// Fire goal auto-linking if this is a goal-type engram with an embedding.
+	if e.goalLinkWorker != nil && eng.MemoryType == storage.TypeGoal && len(eng.Embedding) > 0 {
+		goalEmb := append([]float32(nil), eng.Embedding...)
+		e.goalLinkWorker.EnqueueGoalJob(autoassoc.GoalJob{
+			WS:        wsPrefix,
+			ID:        [16]byte(id),
+			Embedding: goalEmb,
+		})
+	}
+
 	// Notify trigger system after the write is committed and counted.
 	// We copy the engram so the trigger worker goroutine has safe read-only access
 	// to the struct after Write() returns and the caller's stack frame is potentially
@@ -708,14 +883,15 @@ var ErrBatchTooLarge = fmt.Errorf("batch size exceeds maximum of %d", MaxBatchSi
 // the prepared engram plus post-commit metadata. This avoids re-deriving
 // vault prefixes and enrichment fields after the batch commits.
 type preparedBatchItem struct {
-	wsPrefix             [8]byte
-	vaultName            string
-	eng                  *storage.Engram
-	inlineMode           string
-	callerSummary        string
-	callerEntities       []mbp.InlineEntity
-	callerRelationships  []mbp.InlineRelationship
-	skipBackgroundEnrich bool
+	wsPrefix                [8]byte
+	vaultName               string
+	eng                     *storage.Engram
+	inlineMode              string
+	callerSummary           string
+	callerEntities          []mbp.InlineEntity
+	callerRelationships     []mbp.InlineRelationship
+	callerEntityRelationships []mbp.InlineEntityRelationship
+	skipBackgroundEnrich    bool
 }
 
 // WriteBatch writes multiple engrams in a single Pebble batch commit, then
@@ -775,13 +951,6 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 		if callerSummary != "" {
 			eng.Summary = callerSummary
 		}
-		if len(callerEntities) > 0 {
-			entityNames := make([]string, 0, len(callerEntities))
-			for _, ent := range callerEntities {
-				entityNames = append(entityNames, ent.Name+" ("+ent.Type+")")
-			}
-			eng.KeyPoints = append(eng.KeyPoints, entityNames...)
-		}
 		if req.CreatedAt != nil {
 			eng.CreatedAt = *req.CreatedAt
 		}
@@ -812,14 +981,15 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 
 		items[i] = storage.EngramBatchItem{WSPrefix: wsPrefix, Engram: eng}
 		prepared[i] = preparedBatchItem{
-			wsPrefix:             wsPrefix,
-			vaultName:            vaultName,
-			eng:                  eng,
-			inlineMode:           inlineMode,
-			callerSummary:        callerSummary,
-			callerEntities:       callerEntities,
-			callerRelationships:  callerRelationships,
-			skipBackgroundEnrich: skipBG,
+			wsPrefix:                  wsPrefix,
+			vaultName:                 vaultName,
+			eng:                       eng,
+			inlineMode:                inlineMode,
+			callerSummary:             callerSummary,
+			callerEntities:            callerEntities,
+			callerRelationships:       callerRelationships,
+			callerEntityRelationships: req.EntityRelationships,
+			skipBackgroundEnrich:      skipBG,
 		}
 		validCount++
 	}
@@ -848,9 +1018,52 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 		p := &prepared[i]
 		id := ids[i]
 
+		// Store caller-provided inline entities in the entity table (not as KeyPoints).
+		if len(p.callerEntities) > 0 {
+			ws, _ := e.store.FindVaultPrefix(id)
+			var linkedEntityNames []string
+			for _, ent := range p.callerEntities {
+				record := storage.EntityRecord{
+					Name:       ent.Name,
+					Type:       ent.Type,
+					Confidence: 1.0,
+				}
+				if err := e.store.UpsertEntityRecord(ctx, record, "inline"); err != nil {
+					slog.Warn("engine: batch: failed to store inline entity", "name", ent.Name, "err", err)
+					continue
+				}
+				if err := e.store.WriteEntityEngramLink(ctx, ws, id, ent.Name); err != nil {
+					slog.Warn("engine: batch: failed to link inline entity", "name", ent.Name, "err", err)
+					continue
+				}
+				linkedEntityNames = append(linkedEntityNames, ent.Name)
+			}
+			// Write co-occurrence pairs for entities co-appearing in this engram.
+			for i := 0; i < len(linkedEntityNames); i++ {
+				for j := i + 1; j < len(linkedEntityNames); j++ {
+					if err := e.store.IncrementEntityCoOccurrence(ctx, ws, linkedEntityNames[i], linkedEntityNames[j]); err != nil {
+						slog.Warn("engine: batch: failed to increment co-occurrence", "vault", p.vaultName, "engram", id.String(), "entity_a", linkedEntityNames[i], "entity_b", linkedEntityNames[j], "err", err)
+					}
+					if err := e.store.UpsertRelationshipRecord(ctx, ws, id, storage.RelationshipRecord{
+						FromEntity: linkedEntityNames[i],
+						ToEntity:   linkedEntityNames[j],
+						RelType:    "co_occurs_with",
+						Weight:     0.3,
+						Source:     "co-occurrence",
+					}); err != nil {
+						slog.Warn("engine: batch: failed to upsert co_occurs_with relationship", "vault", p.vaultName, "engram", id.String(), "entity_a", linkedEntityNames[i], "entity_b", linkedEntityNames[j], "err", err)
+					}
+				}
+			}
+			// Mark entities as caller-provided so the retroactive processor skips extraction.
+			existing, _ := e.store.GetDigestFlags(ctx, plugin.ULID(id))
+			_ = e.store.SetDigestFlag(ctx, id, existing|plugin.DigestEntities)
+		}
+
 		for _, rel := range p.callerRelationships {
 			targetULID, parseErr := storage.ParseULID(rel.TargetID)
 			if parseErr != nil {
+				slog.Warn("engine: batch: skipping inline relationship with invalid target_id", "target_id", rel.TargetID, "err", parseErr)
 				continue
 			}
 			relAssoc := &storage.Association{
@@ -860,24 +1073,57 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 				Confidence: 1.0,
 				CreatedAt:  time.Now(),
 			}
-			_ = e.store.WriteAssociation(ctx, p.wsPrefix, id, targetULID, relAssoc)
+			if err := e.store.WriteAssociation(ctx, p.wsPrefix, id, targetULID, relAssoc); err != nil {
+				slog.Warn("engine: batch: failed to write inline relationship", "target_id", rel.TargetID, "err", err)
+			}
+		}
+
+		// Store caller-provided entity-to-entity relationships in the 0x21 relationship index.
+		if len(p.callerEntityRelationships) > 0 {
+			wsER, ok := e.store.FindVaultPrefix(id)
+			if !ok {
+				slog.Warn("engine: batch: failed to find vault prefix for entity relationships", "vault", p.vaultName, "engram", id.String())
+			} else {
+				for _, er := range p.callerEntityRelationships {
+					if er.FromEntity == "" || er.ToEntity == "" || er.RelType == "" {
+						continue
+					}
+					weight := er.Weight
+					if weight <= 0 {
+						weight = 0.9
+					}
+					if err := e.store.UpsertRelationshipRecord(ctx, wsER, id, storage.RelationshipRecord{
+						FromEntity: er.FromEntity,
+						ToEntity:   er.ToEntity,
+						RelType:    er.RelType,
+						Weight:     weight,
+						Source:     "inline",
+					}); err != nil {
+						slog.Warn("engine: batch: failed to store entity relationship", "vault", p.vaultName, "engram", id.String(), "from", er.FromEntity, "to", er.ToEntity, "rel_type", er.RelType, "err", err)
+					}
+				}
+			}
 		}
 
 		if p.skipBackgroundEnrich {
-			_ = e.store.SetDigestFlag(ctx, id, 0x04)
+			_ = e.store.SetDigestFlag(ctx, id, plugin.DigestEnrich)
 		}
 
-		_ = e.store.WriteVaultName(p.wsPrefix, p.vaultName)
+		if err := e.store.WriteVaultName(p.wsPrefix, p.vaultName); err != nil {
+			slog.Warn("engine: failed to persist vault name", "vault", p.vaultName, "err", err)
+		}
 
 		if e.ftsWorker != nil {
-			e.ftsWorker.Submit(fts.IndexJob{
+			if !e.ftsWorker.Submit(fts.IndexJob{
 				WS:        p.wsPrefix,
 				ID:        [16]byte(id),
 				Concept:   p.eng.Concept,
 				CreatedBy: p.eng.CreatedBy,
 				Content:   p.eng.Content,
 				Tags:      p.eng.Tags,
-			})
+			}) {
+				slog.Warn("engine: FTS index job dropped in batch write", "id", id.String())
+			}
 		}
 
 		_, contraW, _ := e.cogWorkers()
@@ -950,6 +1196,16 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 			})
 		}
 
+		// Fire goal auto-linking if this is a goal-type engram with an embedding.
+		if e.goalLinkWorker != nil && p.eng.MemoryType == storage.TypeGoal && len(p.eng.Embedding) > 0 {
+			goalEmb := append([]float32(nil), p.eng.Embedding...)
+			e.goalLinkWorker.EnqueueGoalJob(autoassoc.GoalJob{
+				WS:        p.wsPrefix,
+				ID:        [16]byte(id),
+				Embedding: goalEmb,
+			})
+		}
+
 		if e.triggers != nil {
 			vaultID := wsVaultID(p.wsPrefix)
 			engCopy := *p.eng
@@ -985,6 +1241,17 @@ func (e *Engine) Read(ctx context.Context, req *mbp.ReadRequest) (*mbp.ReadRespo
 	if err != nil {
 		return nil, fmt.Errorf("get engram: %w", err)
 	}
+
+	// Fire implicit positive feedback signal asynchronously — read = accessed.
+	go func() {
+		signal := scoring.FeedbackSignal{
+			EngramID:    [16]byte(id),
+			Accessed:    true,
+			ScoreVector: scoring.DefaultWeights(),
+			Timestamp:   time.Now(),
+		}
+		e.scoring.RecordFeedback(e.stopCtx, wsPrefix, signal)
+	}()
 
 	d := time.Since(readStart)
 	if e.latencyTracker != nil {
@@ -1209,6 +1476,12 @@ func (e *Engine) activateCore(ctx context.Context, req *mbp.ActivateRequest, str
 		return nil, fmt.Errorf("activation: %w", err)
 	}
 	metrics.EngineActivationsTotal.Inc()
+
+	// Entity boost phase: spread activation through shared named entities.
+	// After BFS produces a scored set, any engram sharing a named entity with a
+	// top-N result receives a small boost. This surfaces entity-linked engrams
+	// that have no direct association edge to the query-matching engrams.
+	result.Activations = e.applyEntityBoost(ctx, wsPrefix, result.Activations)
 
 	// Convert result.Activations to []mbp.ActivationItem
 	items := make([]mbp.ActivationItem, len(result.Activations))
@@ -1478,7 +1751,7 @@ func (e *Engine) Link(ctx context.Context, req *mbp.LinkRequest) (*mbp.LinkRespo
 						RelType:    uint16(storage.RelContradicts),
 					},
 					{
-						EngramID:   [16]byte(sourceID),
+						EngramID:   [16]byte(targetID),
 						TargetID:   [16]byte(sourceID),
 						TargetHash: 0,
 						RelType:    uint16(storage.RelSupports),
@@ -1806,42 +2079,86 @@ type EngineSessionEntry struct {
 
 // Evolve creates a new version of an existing engram and soft-deletes the old one.
 // It links the new engram to the old one with RelSupersedes and returns the new ID.
+// All three writes (new engram, supersedes association, old engram state) are committed
+// in a single atomic Pebble batch so a crash cannot leave the store in an inconsistent state.
 func (e *Engine) Evolve(ctx context.Context, vault, oldID, newContent, reason string) (storage.ULID, error) {
-	old, err := e.Read(ctx, &mbp.ReadRequest{ID: oldID, Vault: vault})
+	wsPrefix := e.store.ResolveVaultPrefix(vault)
+
+	// Parse the old ULID before any writes.
+	oldULID, err := storage.ParseULID(oldID)
 	if err != nil {
-		return storage.ULID{}, fmt.Errorf("evolve: read old: %w", err)
+		return storage.ULID{}, fmt.Errorf("evolve: parse old id: %w", err)
 	}
 
-	newResp, err := e.Write(ctx, &mbp.WriteRequest{
-		Vault:   vault,
-		Concept: old.Concept + " (evolved)",
-		Content: newContent,
-		Tags:    old.Tags,
-	})
+	// Read the old engram to inherit Concept and Tags.
+	oldEng, err := e.store.GetEngram(ctx, wsPrefix, oldULID)
 	if err != nil {
-		return storage.ULID{}, fmt.Errorf("evolve: write new: %w", err)
+		return storage.ULID{}, fmt.Errorf("evolve: read old engram: %w", err)
+	}
+	if oldEng == nil {
+		return storage.ULID{}, fmt.Errorf("evolve: engram %s not found", oldID)
 	}
 
-	_, err = e.Link(ctx, &mbp.LinkRequest{
-		SourceID: newResp.ID,
-		TargetID: oldID,
-		RelType:  uint16(storage.RelSupersedes),
-		Weight:   1.0,
-		Vault:    vault,
-	})
-	if err != nil {
-		return storage.ULID{}, fmt.Errorf("evolve: link: %w", err)
+	// Build the new engram with a pre-assigned ULID so we can reference it in the
+	// supersedes association within the same batch.
+	newULID := storage.NewULID()
+	now := time.Now()
+	newEng := &storage.Engram{
+		ID:         newULID,
+		Concept:    oldEng.Concept + " (evolved)",
+		Content:    newContent,
+		Tags:       oldEng.Tags,
+		Confidence: 1.0,
+		Stability:  30.0,
+		State:      storage.StateActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		LastAccess: now,
 	}
 
-	_, err = e.Forget(ctx, &mbp.ForgetRequest{ID: oldID, Hard: false, Vault: vault})
-	if err != nil {
-		return storage.ULID{}, fmt.Errorf("evolve: forget old: %w", err)
+	// Build the supersedes association (new → old).
+	supersedes := &storage.Association{
+		TargetID:      oldULID,
+		RelType:       storage.RelSupersedes,
+		Weight:        1.0,
+		Confidence:    1.0,
+		CreatedAt:     now,
+		LastActivated: int32(now.Unix()),
 	}
 
-	newULID, err := storage.ParseULID(newResp.ID)
-	if err != nil {
-		return storage.ULID{}, fmt.Errorf("evolve: parse new id: %w", err)
+	// Single atomic batch: write new engram + supersedes association + soft-delete old engram.
+	batch := e.store.NewBatch()
+	defer batch.Discard()
+
+	if err := batch.WriteEngram(ctx, wsPrefix, newEng); err != nil {
+		return storage.ULID{}, fmt.Errorf("evolve: batch write new engram: %w", err)
 	}
+	if err := batch.WriteAssociation(ctx, wsPrefix, newULID, oldULID, supersedes); err != nil {
+		return storage.ULID{}, fmt.Errorf("evolve: batch write association: %w", err)
+	}
+	if err := batch.UpdateEngramState(ctx, wsPrefix, oldULID, storage.StateSoftDeleted); err != nil {
+		return storage.ULID{}, fmt.Errorf("evolve: batch update old state: %w", err)
+	}
+	if err := batch.Commit(); err != nil {
+		return storage.ULID{}, fmt.Errorf("evolve: batch commit: %w", err)
+	}
+
+	// Persist vault name (idempotent).
+	if err := e.store.WriteVaultName(wsPrefix, vault); err != nil {
+		slog.Warn("engine: failed to persist vault name", "vault", vault, "err", err)
+	}
+
+	// Submit new engram to async FTS worker.
+	if e.ftsWorker != nil {
+		e.ftsWorker.Submit(fts.IndexJob{
+			WS:        wsPrefix,
+			ID:        [16]byte(newULID),
+			Concept:   newEng.Concept,
+			CreatedBy: newEng.CreatedBy,
+			Content:   newEng.Content,
+		})
+	}
+
 	return newULID, nil
 }
 
@@ -2203,5 +2520,34 @@ func (e *Engine) runNoveltyWorker() {
 			}
 		}
 	}
+}
+
+// GetProvenance returns the ordered provenance log for an engram by ID.
+func (e *Engine) GetProvenance(ctx context.Context, vault, id string) ([]provenance.ProvenanceEntry, error) {
+	wsPrefix := e.store.ResolveVaultPrefix(vault)
+	ulid, err := storage.ParseULID(id)
+	if err != nil {
+		return nil, fmt.Errorf("parse id: %w", err)
+	}
+	return e.prov.Get(ctx, wsPrefix, [16]byte(ulid))
+}
+
+// RecordFeedback records an explicit feedback signal for an engram.
+// useful=false signals negative feedback (retrieved but not helpful);
+// useful=true signals positive feedback (retrieved and helpful).
+func (e *Engine) RecordFeedback(ctx context.Context, vault, engramID string, useful bool) error {
+	wsPrefix := e.store.ResolveVaultPrefix(vault)
+	ulid, err := storage.ParseULID(engramID)
+	if err != nil {
+		return fmt.Errorf("parse id: %w", err)
+	}
+	signal := scoring.FeedbackSignal{
+		EngramID:    [16]byte(ulid),
+		Accessed:    useful,
+		ScoreVector: scoring.DefaultWeights(),
+		Timestamp:   time.Now(),
+	}
+	go e.scoring.RecordFeedback(ctx, wsPrefix, signal)
+	return nil
 }
 

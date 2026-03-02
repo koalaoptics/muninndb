@@ -4,8 +4,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/dchest/siphash"
+	"golang.org/x/text/unicode/norm"
 )
 
 // SipHash keys for vault prefix computation
@@ -467,6 +469,39 @@ func EmbedModelKey(ws [8]byte) []byte {
 	return key
 }
 
+// OrdinalKey constructs the ordinal index key (0x1E prefix).
+// Stores the sibling position (ordinal) of childID within parentID.
+// Key: 0x1E | wsPrefix(8) | parentID(16) | childID(16) = 41 bytes
+func OrdinalKey(ws [8]byte, parentID [16]byte, childID [16]byte) []byte {
+	key := make([]byte, 1+8+16+16)
+	key[0] = 0x1E
+	copy(key[1:9], ws[:])
+	copy(key[9:25], parentID[:])
+	copy(key[25:41], childID[:])
+	return key
+}
+
+// OrdinalPrefixForParent returns a 25-byte scan prefix covering all child ordinals
+// under a given parent engram (0x1E | ws(8) | parentID(16)).
+// Used by ListChildOrdinals to scan all children of a parent.
+func OrdinalPrefixForParent(ws [8]byte, parentID [16]byte) []byte {
+	key := make([]byte, 1+8+16)
+	key[0] = 0x1E
+	copy(key[1:9], ws[:])
+	copy(key[9:25], parentID[:])
+	return key
+}
+
+// OrdinalWorkspacePrefix returns a 9-byte scan prefix covering ALL ordinal keys
+// in a workspace (0x1E | ws(8)). Used by DeleteEngram to find all ordinal entries
+// where the deleted engram is a child.
+func OrdinalWorkspacePrefix(ws [8]byte) []byte {
+	key := make([]byte, 1+8)
+	key[0] = 0x1E
+	copy(key[1:9], ws[:])
+	return key
+}
+
 // IncrementWSPrefix returns the next workspace prefix for use as an exclusive
 // upper bound in Pebble range operations.
 func IncrementWSPrefix(ws [8]byte) ([8]byte, error) {
@@ -488,4 +523,147 @@ func Hash(s string) uint32 {
 		h *= 16777619
 	}
 	return h
+}
+
+// EntityNameHash computes the 8-byte SipHash of a NFKC-normalized, lowercased,
+// trimmed entity name. Used for the 0x1F entity key and 0x20 link key.
+func EntityNameHash(name string) [8]byte {
+	normalized := strings.ToLower(strings.TrimSpace(norm.NFKC.String(name)))
+	hashVal := siphash.Hash(sipKey0, sipKey1, []byte(normalized))
+	var h [8]byte
+	binary.BigEndian.PutUint64(h[:], hashVal)
+	return h
+}
+
+// EntityKey constructs the global entity record key (0x1F prefix).
+// Key: 0x1F | nameHash(8) = 9 bytes
+func EntityKey(nameHash [8]byte) []byte {
+	key := make([]byte, 1+8)
+	key[0] = 0x1F
+	copy(key[1:9], nameHash[:])
+	return key
+}
+
+// EntityEngramLinkKey constructs the engram→entity link key (0x20 prefix).
+// Key: 0x20 | wsPrefix(8) | engramID(16) | nameHash(8) = 33 bytes
+func EntityEngramLinkKey(ws [8]byte, engramID [16]byte, nameHash [8]byte) []byte {
+	key := make([]byte, 1+8+16+8)
+	key[0] = 0x20
+	copy(key[1:9], ws[:])
+	copy(key[9:25], engramID[:])
+	copy(key[25:33], nameHash[:])
+	return key
+}
+
+// EntityEngramLinkPrefix returns a 25-byte prefix for scanning all entity links
+// from a given engram (0x20 | ws(8) | engramID(16)).
+func EntityEngramLinkPrefix(ws [8]byte, engramID [16]byte) []byte {
+	key := make([]byte, 1+8+16)
+	key[0] = 0x20
+	copy(key[1:9], ws[:])
+	copy(key[9:25], engramID[:])
+	return key
+}
+
+// RelationshipKey constructs a vault-scoped relationship key (0x21 prefix).
+// Key: 0x21 | ws(8) | engramID(16) | fromNameHash(8) | relTypeByte(1) | toNameHash(8) = 42 bytes
+func RelationshipKey(ws [8]byte, engramID [16]byte, fromHash [8]byte, relTypeByte uint8, toHash [8]byte) []byte {
+	key := make([]byte, 1+8+16+8+1+8)
+	key[0] = 0x21
+	copy(key[1:9], ws[:])
+	copy(key[9:25], engramID[:])
+	copy(key[25:33], fromHash[:])
+	key[33] = relTypeByte
+	copy(key[34:42], toHash[:])
+	return key
+}
+
+// RelationshipPrefix returns the 9-byte scan prefix for all relationship records
+// in a given vault (0x21 | wsPrefix(8)).
+func RelationshipPrefix(ws [8]byte) []byte {
+	key := make([]byte, 1+8)
+	key[0] = 0x21
+	copy(key[1:9], ws[:])
+	return key
+}
+
+// CoOccurrenceKey constructs the entity co-occurrence index key (0x24 prefix).
+// Tracks how many times two entities appear in the same engram within a vault.
+// Key: 0x24 | wsPrefix(8) | nameHashA(8) | nameHashB(8) = 25 bytes
+// Always stored with nameHashA <= nameHashB (canonical pair order).
+// Value: msgpack(coOccurrenceRecord{NameA, NameB, Count uint32}).
+func CoOccurrenceKey(ws [8]byte, hashA, hashB [8]byte) []byte {
+	key := make([]byte, 1+8+8+8)
+	key[0] = 0x24
+	copy(key[1:9], ws[:])
+	copy(key[9:17], hashA[:])
+	copy(key[17:25], hashB[:])
+	return key
+}
+
+// CoOccurrencePrefix returns the 9-byte scan prefix for all co-occurrence entries
+// in a given vault (0x24 | wsPrefix(8)).
+func CoOccurrencePrefix(ws [8]byte) []byte {
+	key := make([]byte, 1+8)
+	key[0] = 0x24
+	copy(key[1:9], ws[:])
+	return key
+}
+
+// EntityReverseIndexKey constructs the entity→engram reverse index key (0x23 prefix).
+// Enables "which engrams mention entity X?" queries by scanning 0x23|nameHash prefix.
+// Key: 0x23 | nameHash(8) | wsPrefix(8) | engramID(16) = 33 bytes
+// Value: empty (all data is encoded in the key).
+func EntityReverseIndexKey(nameHash [8]byte, ws [8]byte, engramID [16]byte) []byte {
+	key := make([]byte, 1+8+8+16)
+	key[0] = 0x23
+	copy(key[1:9], nameHash[:])
+	copy(key[9:17], ws[:])
+	copy(key[17:33], engramID[:])
+	return key
+}
+
+// EntityReverseIndexPrefix returns a 9-byte prefix for scanning all engrams
+// that mention a given entity (0x23 | nameHash(8)).
+func EntityReverseIndexPrefix(nameHash [8]byte) []byte {
+	key := make([]byte, 1+8)
+	key[0] = 0x23
+	copy(key[1:9], nameHash[:])
+	return key
+}
+
+// LastAccessIndexKey constructs the LastAccess index key (0x22 prefix).
+// Uses inverted milliseconds (^uint64(unixMillis)) so ascending Pebble scan
+// returns most-recently-accessed entries first.
+// Key: 0x22 | wsPrefix(8) | invertedMillis(8) | engramID(16) = 33 bytes
+// Value: empty (all data is in the key).
+func LastAccessIndexKey(ws [8]byte, lastAccessMillis int64, engramID [16]byte) []byte {
+	key := make([]byte, 1+8+8+16)
+	key[0] = 0x22
+	copy(key[1:9], ws[:])
+	inverted := ^uint64(lastAccessMillis)
+	binary.BigEndian.PutUint64(key[9:17], inverted)
+	copy(key[17:33], engramID[:])
+	return key
+}
+
+// LastAccessIndexPrefix returns the 9-byte prefix for scanning all LastAccess
+// entries in a vault (0x22 | ws(8)). Ascending scan yields most-recently-accessed first.
+func LastAccessIndexPrefix(ws [8]byte) []byte {
+	key := make([]byte, 1+8)
+	key[0] = 0x22
+	copy(key[1:9], ws[:])
+	return key
+}
+
+// IdempotencyKey constructs the global idempotency receipt key (0x19 prefix).
+// Uses SipHash of the op_id string (same SipHash params as EntityNameHash).
+// Key: 0x19 | siphash(op_id)(8) = 9 bytes
+// Value: JSON {"engram_id": "...", "created_at": unix_nanos}
+func IdempotencyKey(opID string) []byte {
+	hashVal := siphash.Hash(sipKey0, sipKey1, []byte(opID))
+	key := make([]byte, 1+8)
+	key[0] = 0x19
+	binary.BigEndian.PutUint64(key[1:], hashVal)
+	return key
 }

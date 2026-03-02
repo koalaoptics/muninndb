@@ -65,7 +65,7 @@ func TestQueryMethodsCompilable(t *testing.T) {
 	_ = err
 
 	// Traverse
-	_, _, err = eng.Traverse(ctx, "vault", "01HNKZ5F0000000000000000", 2, 10)
+	_, _, err = eng.Traverse(ctx, "vault", "01HNKZ5F0000000000000000", 2, 10, false)
 	_ = err
 
 	// Explain

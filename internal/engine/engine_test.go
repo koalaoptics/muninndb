@@ -670,7 +670,7 @@ func TestEngineTraverse(t *testing.T) {
 	_, _ = eng.Link(ctx, &mbp.LinkRequest{SourceID: r1.ID, TargetID: r2.ID, RelType: 1, Weight: 0.9, Vault: "test"})
 	_, _ = eng.Link(ctx, &mbp.LinkRequest{SourceID: r2.ID, TargetID: r3.ID, RelType: 1, Weight: 0.8, Vault: "test"})
 
-	nodes, edges, err := eng.Traverse(ctx, "test", r1.ID, 3, 50)
+	nodes, edges, err := eng.Traverse(ctx, "test", r1.ID, 3, 50, false)
 	if err != nil {
 		t.Fatalf("Traverse: %v", err)
 	}
@@ -712,7 +712,7 @@ func TestEngineTraverseBoundedHops(t *testing.T) {
 	}
 
 	// Traverse with maxHops=2 — should not reach node[3] or node[4]
-	result, _, err := eng.Traverse(ctx, "test", nodes[0], 2, 100)
+	result, _, err := eng.Traverse(ctx, "test", nodes[0], 2, 100, false)
 	if err != nil {
 		t.Fatalf("Traverse: %v", err)
 	}

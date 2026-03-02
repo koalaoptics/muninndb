@@ -320,6 +320,105 @@ func TestDeleteEngram_RemovesRecord(t *testing.T) {
 	}
 }
 
+// TestDeleteEngram_AutoCleansOrdinalKey verifies that DeleteEngram atomically removes
+// any ordinal keys where the deleted engram is the child.
+func TestDeleteEngram_AutoCleansOrdinalKey(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("auto-ordinal-clean")
+
+	// Write parent and child engrams.
+	parentEng := &Engram{Concept: "parent", Content: "root"}
+	parentID, err := store.WriteEngram(ctx, ws, parentEng)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childEng := &Engram{Concept: "child", Content: "leaf"}
+	childID, err := store.WriteEngram(ctx, ws, childEng)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write ordinal key: parent → child at ordinal 1.
+	if err := store.WriteOrdinal(ctx, ws, parentID, childID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify ordinal exists.
+	_, found, err := store.ReadOrdinal(ctx, ws, parentID, childID)
+	if err != nil || !found {
+		t.Fatalf("ordinal should exist after write: err=%v found=%v", err, found)
+	}
+
+	// Hard-delete the child engram.
+	if err := store.DeleteEngram(ctx, ws, childID); err != nil {
+		t.Fatalf("DeleteEngram: %v", err)
+	}
+
+	// Ordinal key must be gone automatically.
+	_, found, err = store.ReadOrdinal(ctx, ws, parentID, childID)
+	if err != nil {
+		t.Fatalf("ReadOrdinal after delete: %v", err)
+	}
+	if found {
+		t.Error("ordinal key should be automatically removed when child engram is deleted")
+	}
+}
+
+// TestDeleteEngram_AutoCleansParentOrdinalKeys verifies that DeleteEngram atomically
+// removes all ordinal keys where the deleted engram was the parent
+// (i.e. keys of the form 0x1E|ws|deletedID|childID).
+func TestDeleteEngram_AutoCleansParentOrdinalKeys(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("auto-parent-ordinal-clean")
+
+	// Write parent P and children C1, C2.
+	parentID, err := store.WriteEngram(ctx, ws, &Engram{Concept: "parent", Content: "root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1ID, err := store.WriteEngram(ctx, ws, &Engram{Concept: "child1", Content: "leaf1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2ID, err := store.WriteEngram(ctx, ws, &Engram{Concept: "child2", Content: "leaf2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Register both children under P with ordinals.
+	if err := store.WriteOrdinal(ctx, ws, parentID, c1ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteOrdinal(ctx, ws, parentID, c2ID, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sanity check: both ordinal keys exist before deleting the parent.
+	entries, err := store.ListChildOrdinals(ctx, ws, parentID)
+	if err != nil {
+		t.Fatalf("ListChildOrdinals before delete: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 child ordinals before delete, got %d", len(entries))
+	}
+
+	// Hard-delete the parent engram P.
+	if err := store.DeleteEngram(ctx, ws, parentID); err != nil {
+		t.Fatalf("DeleteEngram(parent): %v", err)
+	}
+
+	// All parent-role ordinal keys must be gone automatically.
+	entries, err = store.ListChildOrdinals(ctx, ws, parentID)
+	if err != nil {
+		t.Fatalf("ListChildOrdinals after delete: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 child ordinals after parent deleted, got %d", len(entries))
+	}
+}
+
 // TestDeleteEngram_WithAssociations writes two engrams, links A->B, deletes A,
 // and verifies that the association forward and reverse keys are removed from
 // Pebble so GetAssociations (on a fresh, cache-cold store) returns no edges from A.
@@ -369,5 +468,51 @@ func TestDeleteEngram_WithAssociations(t *testing.T) {
 	}
 	if len(post[idA]) != 0 {
 		t.Errorf("expected 0 associations from A after delete, got %d", len(post[idA]))
+	}
+}
+
+// TestGetMetadata_ReturnNilForMissing verifies that GetMetadata returns nil
+// entries for non-existent engrams without error, allowing callers to
+// distinguish missing from present engrams in a batch call.
+func TestGetMetadata_ReturnNilForMissing(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("getmetadata-missing")
+
+	// Write two engrams.
+	id1 := writeTestEngram(t, store, ws, "exists-1", "content-1")
+	id2 := writeTestEngram(t, store, ws, "exists-2", "content-2")
+
+	// Create a non-existent ID (never written).
+	missingID := NewULID()
+
+	// Call GetMetadata with all three IDs (real, real, missing).
+	metas, err := store.GetMetadata(ctx, ws, []ULID{id1, id2, missingID})
+	if err != nil {
+		t.Fatalf("GetMetadata: %v", err)
+	}
+
+	// Verify we get exactly 3 result slots.
+	if len(metas) != 3 {
+		t.Fatalf("expected 3 metadata results, got %d", len(metas))
+	}
+
+	// Slot 0 (id1): should be non-nil.
+	if metas[0] == nil {
+		t.Error("slot 0 (id1): expected non-nil metadata")
+	} else if metas[0].ID != id1 {
+		t.Errorf("slot 0: ID mismatch: got %v, want %v", metas[0].ID, id1)
+	}
+
+	// Slot 1 (id2): should be non-nil.
+	if metas[1] == nil {
+		t.Error("slot 1 (id2): expected non-nil metadata")
+	} else if metas[1].ID != id2 {
+		t.Errorf("slot 1: ID mismatch: got %v, want %v", metas[1].ID, id2)
+	}
+
+	// Slot 2 (missingID): should be nil (no error).
+	if metas[2] != nil {
+		t.Errorf("slot 2 (missingID): expected nil, got %+v", metas[2])
 	}
 }

@@ -149,6 +149,7 @@ func (ps *PebbleStore) GetEngrams(ctx context.Context, wsPrefix [8]byte, ids []U
 // GetMetadata reads only the metadata fields for a batch of engrams.
 // Uses a two-level cache: metaCache (metadata-only) → L1 engram cache → Pebble.
 // Hot engrams (repeatedly activated) are served entirely from in-memory caches.
+// Missing engrams (deleted or dangling) are returned as nil; callers must check.
 func (ps *PebbleStore) GetMetadata(ctx context.Context, wsPrefix [8]byte, ids []ULID) ([]*EngramMeta, error) {
 	result := make([]*EngramMeta, len(ids))
 	for i, id := range ids {
@@ -183,14 +184,18 @@ func (ps *PebbleStore) GetMetadata(ctx context.Context, wsPrefix [8]byte, ids []
 		key := keys.MetaKey(wsPrefix, [16]byte(id))
 		val, err := getFromReader(ps.pebbleReader(ctx), key)
 		if err != nil {
+			// Unexpected storage error — return it.
 			return nil, fmt.Errorf("get metadata: %w", err)
 		}
 		if val == nil {
-			return nil, fmt.Errorf("metadata not found")
+			// Engram not found — append nil and continue (matching GetEngrams pattern).
+			result[i] = nil
+			continue
 		}
 
 		erfMeta, err := erf.DecodeMeta(val)
 		if err != nil {
+			// Decode error is unexpected — return it (not a missing entry).
 			return nil, fmt.Errorf("decode metadata: %w", err)
 		}
 
@@ -224,10 +229,14 @@ func (ps *PebbleStore) UpdateMetadata(ctx context.Context, wsPrefix [8]byte, id 
 	if err != nil {
 		return err
 	}
-	if len(oldMetas) == 0 {
+	if len(oldMetas) == 0 || oldMetas[0] == nil {
 		return fmt.Errorf("engram not found")
 	}
 	oldState := oldMetas[0].State
+	var prevLastAccessMillis int64
+	if !oldMetas[0].LastAccess.IsZero() {
+		prevLastAccessMillis = oldMetas[0].LastAccess.UnixMilli()
+	}
 
 	// Read raw 0x01 bytes without decoding the full ERF structure.
 	engramKey := keys.EngramKey(wsPrefix, [16]byte(id))
@@ -273,6 +282,14 @@ func (ps *PebbleStore) UpdateMetadata(ctx context.Context, wsPrefix [8]byte, id 
 		return fmt.Errorf("commit batch: %w", err)
 	}
 
+	// Update LastAccess index (best effort — index inconsistency is non-fatal).
+	if !meta.LastAccess.IsZero() {
+		newMillis := meta.LastAccess.UnixMilli()
+		if newMillis != prevLastAccessMillis {
+			_ = ps.WriteLastAccessEntry(ctx, wsPrefix, id, prevLastAccessMillis, newMillis)
+		}
+	}
+
 	// Append provenance entry via persistent worker (best effort — drops if full).
 	ps.provWork.Submit(wsPrefix, id, provenance.ProvenanceEntry{
 		Timestamp: time.Now(),
@@ -294,7 +311,7 @@ func (ps *PebbleStore) UpdateRelevance(ctx context.Context, wsPrefix [8]byte, id
 	if err != nil {
 		return err
 	}
-	if len(metas) == 0 {
+	if len(metas) == 0 || metas[0] == nil {
 		return fmt.Errorf("engram not found")
 	}
 	oldRelevance := metas[0].Relevance
@@ -448,6 +465,36 @@ func (ps *PebbleStore) DeleteEngram(ctx context.Context, wsPrefix [8]byte, id UL
 		revIter.Close()
 	}
 
+	// Ordinal cleanup: scan all ordinal keys in this workspace and delete any where
+	// this engram is the child (bytes [25:41] == id).
+	// Key: 0x1E|ws(8)|parentID(16)|childID(16) = 41 bytes; childID at [25:41].
+	ordinalPrefix := keys.OrdinalWorkspacePrefix(wsPrefix)
+	ordIter, ordErr := PrefixIterator(ps.db, ordinalPrefix)
+	if ordErr == nil {
+		idBytes := [16]byte(id)
+		for ordIter.First(); ordIter.Valid(); ordIter.Next() {
+			k := ordIter.Key()
+			if len(k) != 41 {
+				continue
+			}
+			if bytes.Equal(k[25:41], idBytes[:]) {
+				batch.Delete(k, nil)
+			}
+		}
+		ordIter.Close()
+	}
+
+	// Also clean up ordinal keys where the deleted engram was a parent.
+	// These are keys of the form 0x1E|ws|deletedID|childID.
+	parentPrefix := keys.OrdinalPrefixForParent(wsPrefix, [16]byte(id))
+	parentIter, parentIterErr := PrefixIterator(ps.db, parentPrefix)
+	if parentIterErr == nil {
+		for parentIter.First(); parentIter.Valid(); parentIter.Next() {
+			batch.Delete(parentIter.Key(), nil)
+		}
+		parentIter.Close()
+	}
+
 	if err := batch.Commit(pebble.NoSync); err != nil {
 		return fmt.Errorf("delete engram: %w", err)
 	}
@@ -464,7 +511,7 @@ func (ps *PebbleStore) DeleteEngram(ctx context.Context, wsPrefix [8]byte, id UL
 	}
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, uint64(newCount))
-	if err := ps.db.Set(keys.VaultCountKey(wsPrefix), buf, pebble.NoSync); err != nil {
+	if err := ps.db.Set(keys.VaultCountKey(wsPrefix), buf, pebble.Sync); err != nil {
 		slog.Warn("storage: failed to persist vault count", "error", err)
 	}
 
@@ -516,8 +563,10 @@ func (ps *PebbleStore) SoftDelete(ctx context.Context, wsPrefix [8]byte, id ULID
 		return fmt.Errorf("commit batch: %w", err)
 	}
 
-	// Update cache (vault-scoped).
+	// Update cache (vault-scoped) and invalidate the metadata-only cache
+	// so subsequent GetMetadata calls see the updated StateSoftDeleted state.
 	ps.cache.Set(wsPrefix, id, eng)
+	ps.metaCache.Remove([16]byte(id))
 
 	return nil
 }

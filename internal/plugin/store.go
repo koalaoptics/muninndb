@@ -36,6 +36,11 @@ type PluginStore interface {
 	// LinkEngramToEntity creates an association between an engram and an entity.
 	LinkEngramToEntity(ctx context.Context, engramID ULID, entityName string) error
 
+	// IncrementEntityCoOccurrence increments the co-occurrence count for a pair
+	// of entity names within the vault that contains the given engram.
+	// The vault is resolved via the engramID lookup.
+	IncrementEntityCoOccurrence(ctx context.Context, engramID ULID, nameA, nameB string) error
+
 	// UpsertRelationship stores a typed relationship in the association graph.
 	// Maps to the standard 0x03/0x04 forward/reverse association keys.
 	UpsertRelationship(ctx context.Context, engramID ULID, rel ExtractedRelation) error

@@ -75,6 +75,9 @@ func (rp *RetroactiveProcessor) Stop() {
 		rp.cancelFn()
 	}
 	rp.wg.Wait()
+	rp.statsMu.Lock()
+	rp.stats.Status = "stopped"
+	rp.statsMu.Unlock()
 }
 
 // Stats returns a copy of the current processor statistics.
@@ -82,6 +85,15 @@ func (rp *RetroactiveProcessor) Stats() RetroactiveStats {
 	rp.statsMu.RLock()
 	defer rp.statsMu.RUnlock()
 	return rp.stats
+}
+
+// Mode returns "embed" when this processor handles embedding (DigestEmbed flag)
+// or "enrich" when it handles enrichment (DigestEnrich flag).
+func (rp *RetroactiveProcessor) Mode() string {
+	if rp.flagBit == DigestEmbed {
+		return "embed"
+	}
+	return "enrich"
 }
 
 func (rp *RetroactiveProcessor) run(ctx context.Context) {
@@ -399,14 +411,21 @@ func (rp *RetroactiveProcessor) processEngram(ctx context.Context, eng *Engram) 
 
 	// Check if this is an enrich plugin
 	if enrich, ok := rp.plugin.(EnrichPlugin); ok {
-		// For caller_preferred mode: if the engram already has caller-provided
-		// data for certain fields, the background pipeline should only fill gaps.
-		hasSummary := eng.Summary != ""
-		hasEntities := len(eng.KeyPoints) > 0
+		// Read per-stage digest flags so we don't re-run stages the caller already provided.
+		// engramHasEntities previously used len(eng.KeyPoints) > 0, which incorrectly
+		// conflated summarization keypoints with entity extraction. Flags are authoritative.
+		flags, err := rp.store.GetDigestFlags(ctx, eng.ID)
+		if err != nil {
+			slog.Warn("enrich: failed to read digest flags, skipping engram", "id", eng.ID.String(), "err", err)
+			return nil
+		}
+		hasSummary := eng.Summary != "" || (flags&DigestSummarized != 0)
+		hasEntities := flags&DigestEntities != 0
+		hasRelationships := flags&DigestRelationships != 0
+		hasClassification := flags&DigestClassified != 0
 
-		// If both summary and entities are already present from caller,
-		// skip the enrich call entirely (all fields covered).
-		if hasSummary && hasEntities {
+		// All pipeline stages are already done for this engram — skip it entirely.
+		if hasSummary && hasEntities && hasRelationships && hasClassification {
 			return nil
 		}
 
@@ -417,11 +436,13 @@ func (rp *RetroactiveProcessor) processEngram(ctx context.Context, eng *Engram) 
 		}
 
 		// Only overwrite fields the caller didn't provide.
+		// hasSummary covers both eng.Summary != "" and DigestSummarized flag;
+		// KeyPoints are part of the summarization output so they're guarded by hasSummary.
 		if hasSummary {
 			result.Summary = eng.Summary
-		}
-		if hasEntities {
-			result.KeyPoints = eng.KeyPoints
+			if len(eng.KeyPoints) > 0 {
+				result.KeyPoints = eng.KeyPoints
+			}
 		}
 
 		// Store the enrichment result
@@ -431,10 +452,30 @@ func (rp *RetroactiveProcessor) processEngram(ctx context.Context, eng *Engram) 
 
 		// Upsert entities (only if caller didn't provide them)
 		if !hasEntities {
+			var linkedEntityNames []string
 			for _, entity := range result.Entities {
 				if err := rp.store.UpsertEntity(ctx, entity); err != nil {
-					slog.Warn("failed to upsert entity", "error", err)
+					slog.Warn("enrich: failed to upsert entity", "id", eng.ID.String(), "name", entity.Name, "err", err)
+					continue
 				}
+				if err := rp.store.LinkEngramToEntity(ctx, eng.ID, entity.Name); err != nil {
+					slog.Warn("enrich: failed to link engram to entity", "id", eng.ID.String(), "name", entity.Name, "err", err)
+					continue
+				}
+				linkedEntityNames = append(linkedEntityNames, entity.Name)
+			}
+			// Write co-occurrence pairs for entities co-appearing in this engram.
+			for i := 0; i < len(linkedEntityNames); i++ {
+				for j := i + 1; j < len(linkedEntityNames); j++ {
+					_ = rp.store.IncrementEntityCoOccurrence(ctx, eng.ID, linkedEntityNames[i], linkedEntityNames[j])
+				}
+			}
+		}
+
+		// Mark entity extraction complete so subsequent polls skip this stage.
+		if !hasEntities && len(result.Entities) > 0 {
+			if err := rp.store.SetDigestFlag(ctx, eng.ID, DigestEntities); err != nil {
+				slog.Warn("enrich: failed to set DigestEntities flag", "id", eng.ID.String(), "err", err)
 			}
 		}
 

@@ -7,8 +7,21 @@ import (
 
 func TestAllToolDefinitionsCount(t *testing.T) {
 	tools := allToolDefinitions()
-	if len(tools) != 19 {
-		t.Errorf("expected 19 tools, got %d", len(tools))
+	if len(tools) != 35 {
+		t.Errorf("expected 35 tools, got %d", len(tools))
+	}
+}
+
+func TestAllToolDefinitions_ContainsTreeTools(t *testing.T) {
+	tools := allToolDefinitions()
+	names := make(map[string]bool, len(tools))
+	for _, td := range tools {
+		names[td.Name] = true
+	}
+	for _, want := range []string{"muninn_remember_tree", "muninn_recall_tree", "muninn_add_child"} {
+		if !names[want] {
+			t.Errorf("missing tool: %s", want)
+		}
 	}
 }
 
@@ -61,6 +74,32 @@ func TestExpectedToolNames(t *testing.T) {
 		"muninn_state", "muninn_list_deleted", "muninn_retry_enrich",
 		// Guide
 		"muninn_guide",
+		// Hierarchical memory
+		"muninn_remember_tree", "muninn_recall_tree", "muninn_add_child",
+		// Session context
+		"muninn_where_left_off",
+		// Entity reverse index
+		"muninn_find_by_entity",
+		// Entity lifecycle state
+		"muninn_entity_state",
+		// Entity cluster detection
+		"muninn_entity_clusters",
+		// Knowledge graph export
+		"muninn_export_graph",
+		// Entity similarity detection and merge
+		"muninn_similar_entities",
+		"muninn_merge_entity",
+		// Entity timeline
+		"muninn_entity_timeline",
+		// Enrichment replay
+		"muninn_replay_enrichment",
+		// Provenance audit trail
+		"muninn_provenance",
+		// SGD learning loop feedback
+		"muninn_feedback",
+		// Entity aggregate view
+		"muninn_entity",
+		"muninn_entities",
 	}
 	for _, name := range expected {
 		if !names[name] {
