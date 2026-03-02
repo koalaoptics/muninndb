@@ -171,13 +171,23 @@ func runUpgrade(args []string) {
 		fmt.Printf("  Download %s from:\n", latest)
 		fmt.Printf("    https://github.com/scrypster/muninndb/releases/tag/%s\n", latest)
 		fmt.Println()
-		exec.Command("cmd", "/c", "start",
-			fmt.Sprintf("https://github.com/scrypster/muninndb/releases/tag/%s", latest)).Start()
+		if err := exec.Command("cmd", "/c", "start",
+			fmt.Sprintf("https://github.com/scrypster/muninndb/releases/tag/%s", latest)).Start(); err != nil {
+			fmt.Println("  (Could not open browser automatically — visit the link above.)")
+		}
 		return
 	}
 
-	fmt.Println("  Your data is safe. Only the binary will be replaced.")
-	fmt.Println("  The daemon will restart automatically.")
+	// Detect install type before showing pre-confirm copy
+	usingBrew := isHomebrewInstall()
+
+	if usingBrew {
+		fmt.Println("  Detected Homebrew install.")
+		fmt.Println("  This will run: brew upgrade scrypster/tap/muninn")
+	} else {
+		fmt.Println("  Your data is safe. Only the binary will be replaced.")
+		fmt.Println("  The daemon will restart automatically.")
+	}
 	fmt.Println()
 
 	if !skipConfirm {
@@ -199,9 +209,9 @@ func runUpgrade(args []string) {
 	}
 
 	// Homebrew: delegate to brew
-	if isHomebrewInstall() {
+	if usingBrew {
 		fmt.Println()
-		fmt.Println("  Detected Homebrew install. Running brew upgrade...")
+		fmt.Println("  Running brew upgrade...")
 		fmt.Println()
 		cmd := exec.Command("brew", "upgrade", "scrypster/tap/muninn")
 		cmd.Stdout = os.Stdout
@@ -422,25 +432,48 @@ func selfUpdate(latest string) error {
 		if !daemonWasRunning {
 			return nil
 		}
-		runStop()
+		pidPath := filepath.Join(defaultDataDir(), "muninn.pid")
+		pid, err := readPID(pidPath)
+		if err != nil {
+			// PID file gone — daemon already stopped
+			return nil
+		}
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			return nil
+		}
+		if err := stopProcess(proc); err != nil {
+			return fmt.Errorf("stop daemon: %w", err)
+		}
+		// Wait up to 3s for process to exit
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if !isProcessRunning(pid) {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		os.Remove(pidPath)
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	if err := upgradeStep(fmt.Sprintf("Downloading %s...", latest), func() error {
-		var dlErr error
-		label := fmt.Sprintf("Downloading %s...", latest)
-		tmpPath, dlErr = downloadAndExtractBinaryProgress(assetURL, binaryName, func(dl, total int64) {
-			if total > 0 {
-				mb := float64(dl) / 1024 / 1024
-				fmt.Printf("\r  %-28s%.1f MB", label, mb)
-			}
-		})
+	// Download with inline progress
+	label := fmt.Sprintf("Downloading %s...", latest)
+	fmt.Printf("  %-28s", label)
+	var dlErr error
+	tmpPath, dlErr = downloadAndExtractBinaryProgress(assetURL, binaryName, func(dl, total int64) {
+		if total > 0 {
+			mb := float64(dl) / 1024 / 1024
+			fmt.Printf("\r  %-28s%.1f MB", label, mb)
+		}
+	})
+	if dlErr != nil {
+		fmt.Println(" ✗")
 		return dlErr
-	}); err != nil {
-		return err
 	}
+	fmt.Println(" ✓")
 
 	if err := upgradeStep("Verifying binary...", func() error {
 		if err := os.Chmod(tmpPath, 0755); err != nil {
@@ -459,14 +492,11 @@ func selfUpdate(latest string) error {
 		return err
 	}
 
-	if err := upgradeStep("Restarting daemon...", func() error {
-		if !daemonWasRunning {
-			return nil
-		}
-		runStart(true)
-		return nil
-	}); err != nil {
-		return err
+	// Restart daemon if it was running before
+	if daemonWasRunning {
+		fmt.Printf("  %-28s", "Restarting daemon...")
+		runStart(true) // manages its own output and error handling
+		fmt.Println()
 	}
 
 	return nil
