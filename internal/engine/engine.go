@@ -50,7 +50,63 @@ type Engine struct {
 	activation       *activation.ActivationEngine
 	triggers         *trigger.TriggerSystem
 	engramCount      atomic.Int64
-	cogMu              sync.RWMutex // protects hebbianWorker, contradictWorker, confidenceWorker, transitionWorker
+	// ──────────────────────────────────────────────────────────────────
+	// Cognitive Worker Subsystem
+	// ──────────────────────────────────────────────────────────────────
+	//
+	// Four background workers drive the cognitive pipeline:
+	//
+	//   HebbianWorker          – Hebbian learning: strengthens association
+	//                            weights between co-activated engrams.
+	//   Worker[ContradictItem] – Contradiction detection: flags engrams
+	//                            whose claims conflict with existing knowledge.
+	//   Worker[ConfidenceUpdate] – Confidence decay: adjusts confidence
+	//                              scores over time based on access patterns.
+	//   TransitionWorker       – PAS state transitions: moves engrams
+	//                            through lifecycle states (active → stable
+	//                            → archived) based on scoring signals.
+	//
+	// Hot-Swap Design
+	//
+	// cogMu is an RWMutex that guards all four worker pointers. It exists
+	// because worker assignment changes at runtime during cluster role
+	// transitions. Three operations interact with it:
+	//
+	//   cogWorkers()             – acquires RLock, snapshots all four
+	//                              pointers, releases lock, returns the
+	//                              snapshot. Safe to use after unlock even
+	//                              if a concurrent hot-swap occurs.
+	//   SetCognitiveWorkers()    – called on Cortex promotion (Raft leader
+	//                              election → OnBecameCortex). Acquires
+	//                              write lock, sets all workers, releases.
+	//   ClearCognitiveWorkers()  – called on Lobe demotion (OnBecameLobe).
+	//                              Sets all four pointers to nil under
+	//                              write lock. Lobe nodes perform no local
+	//                              cognitive processing; effects are
+	//                              forwarded to the Cortex.
+	//
+	// Callback Wiring Invariant
+	//
+	// HebbianWorker.OnWeightUpdate is always set BEFORE the worker pointer
+	// is published. In NewEngine, the callback is wired at construction
+	// time. In SetCognitiveWorkers, it is wired before the write lock is
+	// released. This guarantees no concurrent goroutine ever reads a
+	// HebbianWorker reference that lacks its callback.
+	//
+	// Lifecycle Ownership
+	//
+	// The Engine reads worker pointers but does not own their goroutine
+	// lifecycle. In cluster mode, ClusterCoordinator creates and stops
+	// workers; Engine only exposes them. In standalone mode, server.go
+	// creates workers and passes them to NewEngine. transitionWorker is
+	// set separately via SetTransitionWorker() because it follows a
+	// different wiring sequence during cluster promotion.
+	//
+	// Shutdown: Engine.Stop() does NOT stop cognitive workers. Cluster
+	// code (or server.go in standalone) is responsible for calling
+	// hebbianWorker.Stop(), etc. before the process exits.
+	// ──────────────────────────────────────────────────────────────────
+	cogMu              sync.RWMutex
 	hebbianWorker      *cognitive.HebbianWorker
 	contradictWorker   *cognitive.Worker[cognitive.ContradictItem]
 	confidenceWorker   *cognitive.Worker[cognitive.ConfidenceUpdate]
