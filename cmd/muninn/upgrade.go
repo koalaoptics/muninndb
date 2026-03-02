@@ -497,7 +497,7 @@ func selfUpdate(latest string) error {
 	if daemonWasRunning {
 		fmt.Printf("  %-28s", "Restarting daemon...")
 		runStart(true) // manages its own output and error handling
-		fmt.Println()
+		fmt.Println(" ✓")
 	}
 
 	return nil

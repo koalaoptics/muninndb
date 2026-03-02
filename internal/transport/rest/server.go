@@ -740,7 +740,7 @@ func (s *Server) handleLink(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.engine.Stat(r.Context(), &StatRequest{
-		Vault: r.URL.Query().Get("vault"),
+		Vault: ctxVault(r),
 	})
 	if err != nil {
 		s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, err.Error())

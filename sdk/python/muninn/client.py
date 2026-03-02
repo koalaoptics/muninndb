@@ -398,7 +398,7 @@ class MuninnClient:
         await self._request("POST", "/api/link", json=body)
         return True
 
-    async def stats(self) -> StatResponse:
+    async def stats(self, vault: str = "default") -> StatResponse:
         """Get database statistics including coherence scores.
 
         Returns:
@@ -407,7 +407,7 @@ class MuninnClient:
         Raises:
             MuninnError: If stats request fails
         """
-        response = await self._request("GET", "/api/stats")
+        response = await self._request("GET", "/api/stats", params={"vault": vault})
 
         coherence = None
         if response.get("coherence"):
@@ -827,8 +827,8 @@ class MuninnClient:
         links = response if isinstance(response, list) else response.get("links", [])
         return [
             AssociationItem(
-                target_id=link.get("targetId", link.get("target_id", "")),
-                rel_type=link.get("relType", link.get("rel_type", 0)),
+                target_id=link.get("target_id", ""),
+                rel_type=link.get("rel_type", 0),
                 weight=link.get("weight", 0.0),
             )
             for link in links
