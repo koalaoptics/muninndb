@@ -72,6 +72,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist-all/
+          skip-existing: true
 
       - name: Dry run — skip upload
         if: github.event.inputs.dry_run == 'true'
@@ -110,7 +111,13 @@ jobs:
       - name: Publish to npm
         if: github.event.inputs.dry_run != 'true'
         working-directory: sdk/node
-        run: npm publish --access public
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN secret not configured — skipping npm publish."
+            echo "Add an npm Automation token to repo secrets as NPM_TOKEN to enable."
+            exit 0
+          fi
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
