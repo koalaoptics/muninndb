@@ -116,7 +116,7 @@ type ReadResponse struct {
 	Relevance      float32  `msgpack:"relevance"             json:"relevance"`
 	Stability      float32  `msgpack:"stability"             json:"stability"`
 	AccessCount    uint32   `msgpack:"access_count"          json:"access_count"`
-	Tags           []string `msgpack:"tags,omitempty"        json:"tags"`
+	Tags           []string `msgpack:"tags,omitempty"        json:"tags,omitempty"`
 	State          uint8    `msgpack:"state"                 json:"state"`
 	CreatedAt      int64    `msgpack:"created_at"            json:"created_at"`
 	UpdatedAt      int64    `msgpack:"updated_at"            json:"updated_at"`
