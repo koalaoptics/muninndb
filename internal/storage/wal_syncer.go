@@ -87,7 +87,7 @@ func (s *walSyncer) run() {
 				if errors.Is(err, pebble.ErrClosed) {
 					return // expected during shutdown
 				}
-				if strings.Contains(err.Error(), "closed") {
+				if strings.Contains(err.Error(), "closed LogWriter") {
 					return // expected: "pebble/record: closed LogWriter"
 				}
 			}

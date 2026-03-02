@@ -491,8 +491,7 @@ func writeEngramV2WithEmbedding(t *testing.T, ctx context.Context, store *storag
 
 // TestDedup_Determinism verifies that running runPhase2Dedup twice on the same
 // logical input produces identical cluster counts and representative election
-// outcomes. The tag merge order may differ (map iteration), but the set of
-// archived engrams must be identical across runs.
+// outcomes. The tag merge order may differ (map iteration).
 func TestDedup_Determinism(t *testing.T) {
 	ctx := context.Background()
 
