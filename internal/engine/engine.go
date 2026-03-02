@@ -533,7 +533,7 @@ func (e *Engine) ActivityTracker() *cognitive.ActivityTracker {
 
 // Hello implements mbp.EngineAPI.Hello.
 func (e *Engine) Hello(ctx context.Context, req *mbp.HelloRequest) (*mbp.HelloResponse, error) {
-	if req.Version != "1.0" {
+	if req.Version != "1" {
 		return nil, fmt.Errorf("unsupported version: %s", req.Version)
 	}
 
