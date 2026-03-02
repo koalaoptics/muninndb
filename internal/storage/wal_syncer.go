@@ -79,11 +79,20 @@ func (s *walSyncer) run() {
 	// Any other panic is re-panicked so it is not silently swallowed.
 	defer func() {
 		if r := recover(); r != nil {
-			if err, ok := r.(error); ok && errors.Is(err, pebble.ErrClosed) {
-				return // expected during shutdown
+			if err, ok := r.(error); ok {
+				// Catch pebble.ErrClosed ("pebble: closed") and the internal
+				// record.errClosedWriter ("pebble/record: closed LogWriter").
+				// The latter is an unexported error value so we cannot use
+				// errors.Is — match by message substring instead.
+				if errors.Is(err, pebble.ErrClosed) {
+					return // expected during shutdown
+				}
+				if strings.Contains(err.Error(), "closed") {
+					return // expected: "pebble/record: closed LogWriter"
+				}
 			}
 			if s, ok := r.(string); ok && strings.Contains(s, "closed") {
-				return // expected: "pebble/record: closed LogWriter"
+				return // expected: string-form closed panic
 			}
 			panic(r) // unexpected — re-panic
 		}

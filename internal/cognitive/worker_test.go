@@ -2,6 +2,7 @@ package cognitive
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -86,6 +87,44 @@ func TestWorkerAdaptiveScaling(t *testing.T) {
 	stats := w.Stats()
 	if stats.EffectiveWait >= 2*time.Second {
 		t.Fatalf("expected interval to tighten under pressure, got %v", stats.EffectiveWait)
+	}
+}
+
+// TestWorker_NoGoroutineLeak verifies that cancelling the Run context causes
+// the worker goroutine to exit cleanly, leaving no leaked goroutines.
+func TestWorker_NoGoroutineLeak(t *testing.T) {
+	before := runtime.NumGoroutine()
+
+	w := NewWorker(10, 5, 50*time.Millisecond, func(ctx context.Context, batch []int) error {
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.Run(ctx) //nolint:errcheck
+	}()
+
+	// Let the worker settle.
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel context to stop the worker.
+	cancel()
+
+	// Wait for the goroutine to exit.
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker goroutine did not exit after context cancellation")
+	}
+
+	// Allow a brief moment for the runtime scheduler to reclaim the goroutine.
+	time.Sleep(50 * time.Millisecond)
+
+	after := runtime.NumGoroutine()
+	if after > before+2 {
+		t.Errorf("goroutine leak: before=%d after=%d", before, after)
 	}
 }
 

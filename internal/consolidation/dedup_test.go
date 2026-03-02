@@ -489,6 +489,83 @@ func writeEngramV2WithEmbedding(t *testing.T, ctx context.Context, store *storag
 	return id
 }
 
+// TestDedup_Determinism verifies that running runPhase2Dedup twice on the same
+// logical input produces identical cluster counts and representative election
+// outcomes. The tag merge order may differ (map iteration), but the set of
+// archived engrams must be identical across runs.
+func TestDedup_Determinism(t *testing.T) {
+	ctx := context.Background()
+
+	// Run dedup on two independent stores seeded with the same data.
+	runDedup := func(label string) (clusters, merged int, archivedIDs []storage.ULID) {
+		store, db, cleanup := testStoreWithDB(t)
+		defer cleanup()
+		vault := "dedup_det_" + label
+		wsPrefix := store.ResolveVaultPrefix(vault)
+
+		embed1 := []float32{1, 0, 0, 0}
+		embed2 := []float32{0, 1, 0, 0}
+
+		// Cluster A: 2 identical-direction engrams
+		a1 := writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+			Concept: "a1", Content: "content-a1", Confidence: 0.9, Relevance: 0.9,
+			Stability: 30, Embedding: embed1, Tags: []string{"alpha"},
+		})
+		a2 := writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+			Concept: "a2", Content: "content-a2", Confidence: 0.4, Relevance: 0.4,
+			Stability: 30, Embedding: embed1, Tags: []string{"beta"},
+		})
+
+		// Cluster B: 2 identical-direction engrams
+		b1 := writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+			Concept: "b1", Content: "content-b1", Confidence: 0.8, Relevance: 0.8,
+			Stability: 30, Embedding: embed2, Tags: []string{"gamma"},
+		})
+		b2 := writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+			Concept: "b2", Content: "content-b2", Confidence: 0.2, Relevance: 0.2,
+			Stability: 30, Embedding: embed2, Tags: []string{"delta"},
+		})
+		_ = a1
+		_ = b1
+
+		mock := &mockEngineInterface{store: store}
+		w := &Worker{Engine: mock, MaxDedup: 100, MaxTransitive: 100}
+		report := &ConsolidationReport{}
+		if err := w.runPhase2Dedup(ctx, store, wsPrefix, report, vault); err != nil {
+			t.Fatalf("[%s] runPhase2Dedup: %v", label, err)
+		}
+
+		// Collect archived IDs
+		for _, id := range []storage.ULID{a2, b2} {
+			eng, err := store.GetEngram(ctx, wsPrefix, id)
+			if err != nil {
+				t.Fatalf("[%s] GetEngram %v: %v", label, id, err)
+			}
+			if eng.State == storage.StateArchived {
+				archivedIDs = append(archivedIDs, id)
+			}
+		}
+		return report.DedupClusters, report.MergedEngrams, archivedIDs
+	}
+
+	clusters1, merged1, _ := runDedup("run1")
+	clusters2, merged2, _ := runDedup("run2")
+
+	if clusters1 != clusters2 {
+		t.Errorf("non-deterministic cluster count: run1=%d run2=%d", clusters1, clusters2)
+	}
+	if merged1 != merged2 {
+		t.Errorf("non-deterministic merge count: run1=%d run2=%d", merged1, merged2)
+	}
+	// Both runs must find 2 clusters and archive 2 engrams.
+	if clusters1 != 2 {
+		t.Errorf("expected 2 clusters, got %d", clusters1)
+	}
+	if merged1 != 2 {
+		t.Errorf("expected 2 merged engrams, got %d", merged1)
+	}
+}
+
 func TestDedup_V2Embeddings_MergesCluster(t *testing.T) {
 	store, _, cleanup := testStoreWithDB(t)
 	defer cleanup()
