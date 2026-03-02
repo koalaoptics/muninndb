@@ -158,6 +158,7 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "muninn ${GITHUB_REF_NAME}" \
             --generate-notes \
+            --clobber \
             muninn-darwin-arm64 \
             muninn-darwin-amd64 \
             muninn-linux-amd64 \
