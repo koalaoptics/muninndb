@@ -1161,7 +1161,7 @@ func (e *Engine) Read(ctx context.Context, req *mbp.ReadRequest) (*mbp.ReadRespo
 			ScoreVector: scoring.DefaultWeights(),
 			Timestamp:   time.Now(),
 		}
-		e.scoring.RecordFeedback(context.Background(), wsPrefix, signal)
+		e.scoring.RecordFeedback(e.stopCtx, wsPrefix, signal)
 	}()
 
 	d := time.Since(readStart)
@@ -1662,7 +1662,7 @@ func (e *Engine) Link(ctx context.Context, req *mbp.LinkRequest) (*mbp.LinkRespo
 						RelType:    uint16(storage.RelContradicts),
 					},
 					{
-						EngramID:   [16]byte(sourceID),
+						EngramID:   [16]byte(targetID),
 						TargetID:   [16]byte(sourceID),
 						TargetHash: 0,
 						RelType:    uint16(storage.RelSupports),
