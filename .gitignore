@@ -46,6 +46,7 @@ muninndb-data/
 
 # Worktrees
 .worktrees/
+.claude/worktrees/
 
 # Bible eval testdata (downloaded via scripts/eval-bible-setup.sh)
 testdata/bible/kjv.json
