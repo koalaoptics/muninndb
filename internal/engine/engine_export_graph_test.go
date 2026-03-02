@@ -62,8 +62,10 @@ func TestExportGraph_JSONLDFormat(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, g)
 
-	// Should have 2 nodes (PostgreSQL, Redis) and 1 edge.
-	require.Len(t, g.Edges, 1, "expected 1 edge")
+	// Should have 2 nodes (PostgreSQL, Redis) and 2 edges:
+	// one "manages" edge from the explicit UpsertRelationshipRecord call,
+	// and one "co_occurs_with" edge auto-populated at write time.
+	require.Len(t, g.Edges, 2, "expected 2 edges (manages + co_occurs_with)")
 	require.Len(t, g.Nodes, 2, "expected 2 nodes")
 
 	jsonLD, err := FormatGraphJSONLD(g)
@@ -84,19 +86,18 @@ func TestExportGraph_JSONLDFormat(t *testing.T) {
 	// 2 entity nodes + 1 relationship node
 	require.GreaterOrEqual(t, len(graph), 2, "expected at least 2 entries in @graph")
 
-	// Find a relationship entry.
-	foundRel := false
+	// Find the "manages" relationship entry (there may also be a co_occurs_with edge).
+	foundManages := false
 	for _, item := range graph {
 		m, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
-		if m["@type"] == "muninn:Relationship" {
-			foundRel = true
-			require.Equal(t, "manages", m["muninn:relType"])
+		if m["@type"] == "muninn:Relationship" && m["muninn:relType"] == "manages" {
+			foundManages = true
 		}
 	}
-	require.True(t, foundRel, "expected at least one muninn:Relationship in @graph")
+	require.True(t, foundManages, "expected a muninn:Relationship with relType 'manages' in @graph")
 }
 
 func TestExportGraph_GraphMLFormat(t *testing.T) {
@@ -125,6 +126,69 @@ func TestExportGraph_GraphMLFormat(t *testing.T) {
 	// Should contain the edge.
 	require.Contains(t, graphML, `<edge`)
 	require.Contains(t, graphML, "uses")
+}
+
+func TestExportGraph_DeduplicatesEdgesByTriple(t *testing.T) {
+	// Two relationship records with same (from, to, relType) but different weights.
+	// Export should return one edge with the higher weight.
+	eng, cleanup := testEnv(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	ws := eng.store.ResolveVaultPrefix("dedup-vault")
+	var id1, id2 storage.ULID
+	id1[0] = 1
+	id2[0] = 2
+
+	_ = eng.store.UpsertRelationshipRecord(ctx, ws, id1, storage.RelationshipRecord{
+		FromEntity: "A", ToEntity: "B", RelType: "co_occurs_with", Weight: 0.3, Source: "co-occurrence",
+	})
+	_ = eng.store.UpsertRelationshipRecord(ctx, ws, id2, storage.RelationshipRecord{
+		FromEntity: "A", ToEntity: "B", RelType: "co_occurs_with", Weight: 0.4, Source: "co-occurrence",
+	})
+
+	g, err := eng.ExportGraph(ctx, "dedup-vault", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Edges) != 1 {
+		t.Fatalf("want 1 deduplicated edge, got %d", len(g.Edges))
+	}
+	if g.Edges[0].Weight != 0.4 {
+		t.Fatalf("want max weight 0.4, got %f", g.Edges[0].Weight)
+	}
+}
+
+func TestExportGraph_CoOccursWithAutoPopulated(t *testing.T) {
+	// Write an engram with two inline entities.
+	// ExportGraph should return a co_occurs_with edge without any explicit UpsertRelationshipRecord call.
+	eng, cleanup := testEnv(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	_, err := eng.Write(ctx, &mbp.WriteRequest{
+		Vault:   "cooccur-test",
+		Concept: "test",
+		Content: "PostgreSQL uses Redis for caching session data.",
+		Entities: []mbp.InlineEntity{
+			{Name: "PostgreSQL", Type: "database"},
+			{Name: "Redis", Type: "database"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := eng.ExportGraph(ctx, "cooccur-test", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Edges) != 1 {
+		t.Fatalf("want 1 co_occurs_with edge, got %d", len(g.Edges))
+	}
+	if g.Edges[0].RelType != "co_occurs_with" {
+		t.Fatalf("want co_occurs_with, got %s", g.Edges[0].RelType)
+	}
 }
 
 func TestExportGraph_EmptyVault(t *testing.T) {

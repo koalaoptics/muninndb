@@ -585,6 +585,13 @@ func (e *Engine) Write(ctx context.Context, req *mbp.WriteRequest) (*mbp.WriteRe
 		for i := 0; i < len(linkedEntityNames); i++ {
 			for j := i + 1; j < len(linkedEntityNames); j++ {
 				_ = e.store.IncrementEntityCoOccurrence(ctx, ws, linkedEntityNames[i], linkedEntityNames[j])
+				_ = e.store.UpsertRelationshipRecord(ctx, ws, id, storage.RelationshipRecord{
+					FromEntity: linkedEntityNames[i],
+					ToEntity:   linkedEntityNames[j],
+					RelType:    "co_occurs_with",
+					Weight:     0.3,
+					Source:     "co-occurrence",
+				})
 			}
 		}
 		// Mark entities as caller-provided so the retroactive processor skips extraction.
@@ -940,6 +947,13 @@ func (e *Engine) WriteBatch(ctx context.Context, reqs []*mbp.WriteRequest) ([]*m
 			for i := 0; i < len(linkedEntityNames); i++ {
 				for j := i + 1; j < len(linkedEntityNames); j++ {
 					_ = e.store.IncrementEntityCoOccurrence(ctx, ws, linkedEntityNames[i], linkedEntityNames[j])
+					_ = e.store.UpsertRelationshipRecord(ctx, ws, id, storage.RelationshipRecord{
+						FromEntity: linkedEntityNames[i],
+						ToEntity:   linkedEntityNames[j],
+						RelType:    "co_occurs_with",
+						Weight:     0.3,
+						Source:     "co-occurrence",
+					})
 				}
 			}
 			// Mark entities as caller-provided so the retroactive processor skips extraction.
