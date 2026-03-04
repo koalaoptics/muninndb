@@ -28,6 +28,13 @@ type MCPServer struct {
 
 	sseSessionsMu    sync.Mutex
 	sseSessions      map[string]*sseSession // sessionID → session
+	// NOTE: idempotencyLocks grows by one entry per unique op_id seen during the
+	// process lifetime. In practice op_id cardinality is low (client-generated,
+	// not per-request UUIDs), so growth is bounded by usage patterns. The
+	// canonical exactly-once guarantee lives in Pebble; the in-memory lock only
+	// prevents the concurrent check→write TOCTOU race during the narrow window
+	// before a receipt is written. Disk accumulation is addressed by
+	// runIdempotencySweep (see engine.go).
 	idempotencyLocks sync.Map
 }
 

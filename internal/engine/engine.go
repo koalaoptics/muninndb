@@ -171,6 +171,10 @@ type Engine struct {
 	// (PruneVault, ReindexFTSVault, ClearVault). Maps string vault name → *sync.Mutex.
 	vaultMu sync.Map
 
+	// NOTE: childMu grows by one entry per unique parent ULID ever passed to
+	// AddChild. This is bounded by the number of distinct tree nodes in the
+	// database — it cannot grow faster than the corpus itself — so no eviction
+	// is needed.
 	childMu sync.Map
 }
 

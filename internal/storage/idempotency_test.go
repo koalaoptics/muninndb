@@ -21,6 +21,7 @@ func TestPurgeExpiredIdempotency(t *testing.T) {
 	// Stale: created more than maxAge ago.
 	staleTime := time.Now().Add(-2 * maxAge).UnixNano()
 	staleIDs := []string{"stale-op-1", "stale-op-2", "stale-op-3"}
+	// Write receipts directly to control CreatedAt; WriteIdempotency always uses time.Now().
 	for _, opID := range staleIDs {
 		receipt := IdempotencyReceipt{
 			EngramID:  "engram-" + opID,
