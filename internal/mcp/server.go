@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/time/rate"
 )
 
@@ -27,29 +26,18 @@ type MCPServer struct {
 	srv       *http.Server
 	tlsConfig *tls.Config // nil = plain TCP
 
-	sseSessionsMu  sync.Mutex
-	sseSessions    map[string]*sseSession // sessionID → session
-	idempotencyMu  sync.Mutex                      // guards idempotencyLRU get-or-create
-	idempotencyLRU *lru.Cache[string, *sync.Mutex] // bounded per-op_id mutexes
+	sseSessionsMu    sync.Mutex
+	sseSessions      map[string]*sseSession // sessionID → session
+	idempotencyLocks sync.Map
 }
 
 // getIdempotencyLock returns (or lazily creates) a per-op_id mutex. This is
 // used by handleRemember to prevent TOCTOU races when two concurrent requests
 // arrive with the same op_id: only one goroutine at a time can execute the
 // check→write→store-receipt flow for a given op_id.
-//
-// idempotencyMu is held only for the nanosecond LRU get-or-create; it is
-// released before the caller acquires the returned per-op_id mutex, so it
-// never spans the check→write→receipt window.
 func (s *MCPServer) getIdempotencyLock(opID string) *sync.Mutex {
-	s.idempotencyMu.Lock()
-	mu, ok := s.idempotencyLRU.Get(opID)
-	if !ok {
-		mu = &sync.Mutex{}
-		s.idempotencyLRU.Add(opID, mu)
-	}
-	s.idempotencyMu.Unlock()
-	return mu
+	v, _ := s.idempotencyLocks.LoadOrStore(opID, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 type sseSession struct {
@@ -61,14 +49,12 @@ type sseSession struct {
 // token is the required Bearer token; pass "" to disable auth.
 // tlsConfig, if non-nil, enables TLS on the listener.
 func New(addr string, eng EngineInterface, token string, tlsConfig *tls.Config) *MCPServer {
-	idempLRU, _ := lru.New[string, *sync.Mutex](10_000)
 	s := &MCPServer{
-		engine:         eng,
-		token:          token,
-		limiter:        rate.NewLimiter(rate.Limit(100), 200),
-		sseSessions:    make(map[string]*sseSession),
-		tlsConfig:      tlsConfig,
-		idempotencyLRU: idempLRU,
+		engine:      eng,
+		token:       token,
+		limiter:     rate.NewLimiter(rate.Limit(100), 200),
+		sseSessions: make(map[string]*sseSession),
+		tlsConfig:   tlsConfig,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
