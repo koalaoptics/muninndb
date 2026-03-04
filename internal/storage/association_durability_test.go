@@ -137,6 +137,75 @@ func TestAssocMetadata_PreservedThroughDecay(t *testing.T) {
 	}
 }
 
+// TestAssocPeakWeight_TrackedAcrossUpdates verifies PeakWeight records
+// the historical maximum and is never reduced by subsequent lower updates.
+func TestAssocPeakWeight_TrackedAcrossUpdates(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("peak-tracking")
+	src, dst := NewULID(), NewULID()
+
+	// Write at 0.4
+	if err := store.WriteAssociation(ctx, ws, src, dst, &Association{
+		TargetID: dst, Weight: 0.4,
+	}); err != nil {
+		t.Fatalf("WriteAssociation: %v", err)
+	}
+
+	// Boost to 0.8 — peak becomes 0.8
+	if err := store.UpdateAssocWeight(ctx, ws, src, dst, 0.8); err != nil {
+		t.Fatalf("UpdateAssocWeight to 0.8: %v", err)
+	}
+
+	// Drop to 0.3 — peak should remain 0.8
+	if err := store.UpdateAssocWeight(ctx, ws, src, dst, 0.3); err != nil {
+		t.Fatalf("UpdateAssocWeight to 0.3: %v", err)
+	}
+
+	// Open fresh store (bypass cache) to read from Pebble directly
+	fresh := NewPebbleStore(store.db, PebbleStoreConfig{CacheSize: 100})
+	assocs, err := fresh.GetAssociations(ctx, ws, []ULID{src}, 10)
+	if err != nil {
+		t.Fatalf("GetAssociations: %v", err)
+	}
+	got := assocs[src]
+	if len(got) != 1 {
+		t.Fatalf("expected 1 association, got %d", len(got))
+	}
+	if got[0].PeakWeight != 0.8 {
+		t.Errorf("PeakWeight: want 0.8, got %.4f (must not decrease)", got[0].PeakWeight)
+	}
+	if got[0].Weight != 0.3 {
+		t.Errorf("Weight: want 0.3, got %.4f", got[0].Weight)
+	}
+}
+
+// TestAssocPeakWeight_InitialWriteSetsPeak verifies WriteAssociation seeds PeakWeight = Weight.
+func TestAssocPeakWeight_InitialWriteSetsPeak(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("peak-initial")
+	src, dst := NewULID(), NewULID()
+
+	if err := store.WriteAssociation(ctx, ws, src, dst, &Association{
+		TargetID: dst, Weight: 0.7,
+	}); err != nil {
+		t.Fatalf("WriteAssociation: %v", err)
+	}
+
+	fresh := NewPebbleStore(store.db, PebbleStoreConfig{CacheSize: 100})
+	assocs, err := fresh.GetAssociations(ctx, ws, []ULID{src}, 10)
+	if err != nil {
+		t.Fatalf("GetAssociations: %v", err)
+	}
+	if len(assocs[src]) != 1 {
+		t.Fatalf("expected 1 association, got %d", len(assocs[src]))
+	}
+	if assocs[src][0].PeakWeight != 0.7 {
+		t.Errorf("PeakWeight on initial write: want 0.7, got %.4f", assocs[src][0].PeakWeight)
+	}
+}
+
 // TestAssocDecay_RecencySkip verifies that an edge activated very recently
 // (within the last few minutes) is NOT decayed, even with an aggressive factor.
 //

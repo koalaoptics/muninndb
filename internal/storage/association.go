@@ -13,11 +13,12 @@ import (
 	"github.com/scrypster/muninndb/internal/storage/keys"
 )
 
-// encodeAssocValue serializes association metadata into the 18-byte value
-// stored under association forward/reverse keys (0x03/0x04).
-// Layout: relType(uint16 BE,2) | confidence(float32 BE,4) | createdAt(int64 nanos BE,8) | lastActivated(int32 BE,4)
-func encodeAssocValue(relType RelType, confidence float32, createdAt time.Time, lastActivated int32) [18]byte {
-	var val [18]byte
+// encodeAssocValue serializes association metadata into the 22-byte value
+// stored under 0x03/0x04 Pebble keys.
+// Layout: relType(2) | confidence(4) | createdAt(8) | lastActivated(4) | peakWeight(4) = 22 bytes
+// Old readers that only consume 18 bytes continue to work; peakWeight is at the tail.
+func encodeAssocValue(relType RelType, confidence float32, createdAt time.Time, lastActivated int32, peakWeight float32) [22]byte {
+	var val [22]byte
 	binary.BigEndian.PutUint16(val[0:2], uint16(relType))
 	binary.BigEndian.PutUint32(val[2:6], math.Float32bits(confidence))
 	var nanos int64
@@ -26,17 +27,26 @@ func encodeAssocValue(relType RelType, confidence float32, createdAt time.Time, 
 	}
 	binary.BigEndian.PutUint64(val[6:14], uint64(nanos))
 	binary.BigEndian.PutUint32(val[14:18], uint32(lastActivated))
+	binary.BigEndian.PutUint32(val[18:22], math.Float32bits(peakWeight))
 	return val
 }
 
-// decodeAssocValue decodes the 18-byte association value.
-// All-zero values are treated as legacy (pre-BUG-2-fix): returns relType=0, confidence=1.0.
-func decodeAssocValue(val []byte) (relType RelType, confidence float32, createdAt time.Time, lastActivated int32) {
+// decodeAssocValue decodes a 18-byte (legacy) or 22-byte association value.
+// Returns peakWeight=0 for legacy 18-byte values.
+// All-zero 18-byte values treated as pre-fix legacy: confidence=1.0, rest zero.
+func decodeAssocValue(val []byte) (relType RelType, confidence float32, createdAt time.Time, lastActivated int32, peakWeight float32) {
 	if len(val) < 18 {
-		return 0, 1.0, time.Time{}, 0
+		return 0, 1.0, time.Time{}, 0, 0
+	}
+	// All-zero check: if the entire value is zero, treat as legacy pre-BUG-2-fix.
+	// Check the full slice length so that a 22-byte value with a non-zero peakWeight
+	// tail is not incorrectly classified as legacy (e.g. relType=0, confidence=0.0).
+	checkLen := len(val)
+	if checkLen > 22 {
+		checkLen = 22
 	}
 	allZero := true
-	for _, b := range val[:18] {
+	for _, b := range val[:checkLen] {
 		if b != 0 {
 			allZero = false
 			break
@@ -44,7 +54,7 @@ func decodeAssocValue(val []byte) (relType RelType, confidence float32, createdA
 	}
 	if allZero {
 		// Legacy association written before BUG-2 fix; use optimistic defaults.
-		return 0, 1.0, time.Time{}, 0
+		return 0, 1.0, time.Time{}, 0, 0
 	}
 	relType = RelType(binary.BigEndian.Uint16(val[0:2]))
 	confidence = math.Float32frombits(binary.BigEndian.Uint32(val[2:6]))
@@ -53,6 +63,9 @@ func decodeAssocValue(val []byte) (relType RelType, confidence float32, createdA
 		createdAt = time.Unix(0, nanos)
 	}
 	lastActivated = int32(binary.BigEndian.Uint32(val[14:18]))
+	if len(val) >= 22 {
+		peakWeight = math.Float32frombits(binary.BigEndian.Uint32(val[18:22]))
+	}
 	return
 }
 
@@ -70,8 +83,9 @@ func (ps *PebbleStore) WriteAssociation(ctx context.Context, wsPrefix [8]byte, s
 	defer batch.Close()
 
 	// Forward association (0x03 key)
+	// PeakWeight is seeded to Weight on initial write — this is the association's first peak.
 	fwdKey := keys.AssocFwdKey(wsPrefix, [16]byte(src), assoc.Weight, [16]byte(dst))
-	assocValue := encodeAssocValue(assoc.RelType, assoc.Confidence, assoc.CreatedAt, assoc.LastActivated)
+	assocValue := encodeAssocValue(assoc.RelType, assoc.Confidence, assoc.CreatedAt, assoc.LastActivated, assoc.Weight)
 	batch.Set(fwdKey, assocValue[:], nil)
 
 	// Reverse association (0x04 key)
@@ -165,7 +179,7 @@ func (ps *PebbleStore) GetAssociations(ctx context.Context, wsPrefix [8]byte, id
 			var wc [4]byte
 			copy(wc[:], k[25:29])
 			weight := keys.WeightFromComplement(wc)
-			relType, confidence, createdAt, lastActivated := decodeAssocValue(iter.Value())
+			relType, confidence, createdAt, lastActivated, peakWeight := decodeAssocValue(iter.Value())
 			assocs = append(assocs, Association{
 				TargetID:      targetID,
 				Weight:        weight,
@@ -173,6 +187,7 @@ func (ps *PebbleStore) GetAssociations(ctx context.Context, wsPrefix [8]byte, id
 				Confidence:    confidence,
 				CreatedAt:     createdAt,
 				LastActivated: lastActivated,
+				PeakWeight:    peakWeight,
 			})
 		}
 
@@ -228,9 +243,9 @@ func (ps *PebbleStore) associationsForOne(wsPrefix [8]byte, id ULID, maxPerNode 
 		copy(wc[:], key[25:29])
 		weight := keys.WeightFromComplement(wc)
 
-		// Decode value bytes: rel_type, confidence, timestamps
+		// Decode value bytes: rel_type, confidence, timestamps, peakWeight
 		val := iter.Value()
-		relType, confidence, createdAt, lastActivated := decodeAssocValue(val)
+		relType, confidence, createdAt, lastActivated, peakWeight := decodeAssocValue(val)
 
 		assocs = append(assocs, Association{
 			TargetID:      targetID,
@@ -239,6 +254,7 @@ func (ps *PebbleStore) associationsForOne(wsPrefix [8]byte, id ULID, maxPerNode 
 			Confidence:    confidence,
 			CreatedAt:     createdAt,
 			LastActivated: lastActivated,
+			PeakWeight:    peakWeight,
 		})
 	}
 	// Populate cache — expirable.LRU enforces the TTL automatically.
@@ -261,14 +277,14 @@ func (ps *PebbleStore) GetAssocWeight(ctx context.Context, wsPrefix [8]byte, a, 
 // getAssocValue reads the decoded association metadata for pair (a→b).
 // Uses knownWeight to construct the 0x03 key. Returns zero values if no
 // association exists or the key cannot be read.
-func (ps *PebbleStore) getAssocValue(wsPrefix [8]byte, a, b ULID, knownWeight float32) (relType RelType, confidence float32, createdAt time.Time, lastActivated int32) {
+func (ps *PebbleStore) getAssocValue(wsPrefix [8]byte, a, b ULID, knownWeight float32) (relType RelType, confidence float32, createdAt time.Time, lastActivated int32, peakWeight float32) {
 	if knownWeight <= 0 {
-		return 0, 1.0, time.Time{}, 0
+		return 0, 1.0, time.Time{}, 0, 0
 	}
 	fwdKey := keys.AssocFwdKey(wsPrefix, [16]byte(a), knownWeight, [16]byte(b))
 	val, err := Get(ps.db, fwdKey)
 	if err != nil || val == nil {
-		return 0, 1.0, time.Time{}, 0
+		return 0, 1.0, time.Time{}, 0, 0
 	}
 	return decodeAssocValue(val)
 }
@@ -284,7 +300,7 @@ func (ps *PebbleStore) UpdateAssocWeight(ctx context.Context, wsPrefix [8]byte, 
 
 	// Read existing metadata before deleting old keys.
 	oldWeight, _ := ps.GetAssocWeight(ctx, wsPrefix, a, b)
-	relType, confidence, createdAt, _ := ps.getAssocValue(wsPrefix, a, b, oldWeight)
+	relType, confidence, createdAt, _, existingPeak := ps.getAssocValue(wsPrefix, a, b, oldWeight)
 
 	if oldWeight > 0 {
 		batch.Delete(keys.AssocFwdKey(wsPrefix, [16]byte(a), oldWeight, [16]byte(b)), nil)
@@ -292,8 +308,13 @@ func (ps *PebbleStore) UpdateAssocWeight(ctx context.Context, wsPrefix [8]byte, 
 	}
 
 	// Preserve existing metadata; set lastActivated = now (Hebbian update = activation).
+	// PeakWeight is monotonically non-decreasing: max(existingPeak, newWeight).
 	now := int32(time.Now().Unix())
-	assocValue := encodeAssocValue(relType, confidence, createdAt, now)
+	newPeak := existingPeak
+	if weight > newPeak {
+		newPeak = weight
+	}
+	assocValue := encodeAssocValue(relType, confidence, createdAt, now, newPeak)
 	batch.Set(keys.AssocFwdKey(wsPrefix, [16]byte(a), weight, [16]byte(b)), assocValue[:], nil)
 	batch.Set(keys.AssocRevKey(wsPrefix, [16]byte(b), weight, [16]byte(a)), assocValue[:], nil)
 
@@ -322,14 +343,19 @@ func (ps *PebbleStore) UpdateAssocWeightBatch(ctx context.Context, updates []Ass
 
 	for _, update := range updates {
 		oldWeight, _ := ps.GetAssocWeight(ctx, update.WS, update.Src, update.Dst)
-		relType, confidence, createdAt, _ := ps.getAssocValue(update.WS, ULID(update.Src), ULID(update.Dst), oldWeight)
+		relType, confidence, createdAt, _, existingPeak := ps.getAssocValue(update.WS, ULID(update.Src), ULID(update.Dst), oldWeight)
 
 		if oldWeight > 0 {
 			batch.Delete(keys.AssocFwdKey(update.WS, update.Src, oldWeight, update.Dst), nil)
 			batch.Delete(keys.AssocRevKey(update.WS, update.Dst, oldWeight, update.Src), nil)
 		}
 
-		assocValue := encodeAssocValue(relType, confidence, createdAt, now)
+		// PeakWeight is monotonically non-decreasing: max(existingPeak, newWeight).
+		newPeak := existingPeak
+		if update.Weight > newPeak {
+			newPeak = update.Weight
+		}
+		assocValue := encodeAssocValue(relType, confidence, createdAt, now, newPeak)
 		batch.Set(keys.AssocFwdKey(update.WS, update.Src, update.Weight, update.Dst), assocValue[:], nil)
 		batch.Set(keys.AssocRevKey(update.WS, update.Dst, update.Weight, update.Src), assocValue[:], nil)
 
@@ -379,6 +405,7 @@ func (ps *PebbleStore) DecayAssocWeights(ctx context.Context, wsPrefix [8]byte, 
 		confidence    float32
 		createdAt     time.Time
 		lastActivated int32
+		peakWeight    float32 // historical max Weight
 	}
 
 	removed := 0
@@ -396,7 +423,12 @@ func (ps *PebbleStore) DecayAssocWeights(ctx context.Context, wsPrefix [8]byte, 
 			if !e.remove {
 				// Preserve existing metadata. Do NOT update lastActivated here —
 				// decay is a background process, not a user activation.
-				val := encodeAssocValue(e.relType, e.confidence, e.createdAt, e.lastActivated)
+				// Keep peak up to date (shouldn't change during decay, but guard).
+				peak := e.peakWeight
+				if e.newW > peak {
+					peak = e.newW
+				}
+				val := encodeAssocValue(e.relType, e.confidence, e.createdAt, e.lastActivated, peak)
 				_ = batch.Set(keys.AssocFwdKey(wsPrefix, e.src, e.newW, e.dst), val[:], nil)
 				_ = batch.Set(keys.AssocRevKey(wsPrefix, e.dst, e.newW, e.src), val[:], nil)
 				var wiBuf [4]byte
@@ -420,7 +452,7 @@ func (ps *PebbleStore) DecayAssocWeights(ctx context.Context, wsPrefix [8]byte, 
 		}
 
 		// Decode existing metadata from the value bytes before extracting key fields.
-		relType, confidence, createdAt, lastActivated := decodeAssocValue(iter.Value())
+		relType, confidence, createdAt, lastActivated, peakWeight := decodeAssocValue(iter.Value())
 
 		// Recency skip: associations activated within the grace window are not decayed.
 		// Window must be > a few seconds (to protect edges just activated) but
@@ -446,6 +478,7 @@ func (ps *PebbleStore) DecayAssocWeights(ctx context.Context, wsPrefix [8]byte, 
 			src: src, dst: dst, oldW: oldW, newW: newW,
 			relType: relType, confidence: confidence,
 			createdAt: createdAt, lastActivated: lastActivated,
+			peakWeight: peakWeight,
 		}
 		if newW < minWeight {
 			e.remove = true
@@ -520,7 +553,7 @@ func (ps *PebbleStore) GetChildrenByParent(ctx context.Context, wsPrefix [8]byte
 			continue
 		}
 		val := iter.Value()
-		relType, _, _, _ := decodeAssocValue(val)
+		relType, _, _, _, _ := decodeAssocValue(val)
 		if relType != RelIsPartOf {
 			continue
 		}
