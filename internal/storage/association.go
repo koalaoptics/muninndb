@@ -258,23 +258,42 @@ func (ps *PebbleStore) GetAssocWeight(ctx context.Context, wsPrefix [8]byte, a, 
 	return math.Float32frombits(binary.BigEndian.Uint32(val[:4])), nil
 }
 
+// getAssocValue reads the decoded association metadata for pair (a→b).
+// Uses knownWeight to construct the 0x03 key. Returns zero values if no
+// association exists or the key cannot be read.
+func (ps *PebbleStore) getAssocValue(wsPrefix [8]byte, a, b ULID, knownWeight float32) (relType RelType, confidence float32, createdAt time.Time, lastActivated int32) {
+	if knownWeight <= 0 {
+		return 0, 1.0, time.Time{}, 0
+	}
+	fwdKey := keys.AssocFwdKey(wsPrefix, [16]byte(a), knownWeight, [16]byte(b))
+	val, err := Get(ps.db, fwdKey)
+	if err != nil || val == nil {
+		return 0, 1.0, time.Time{}, 0
+	}
+	return decodeAssocValue(val)
+}
+
 // UpdateAssocWeight writes/updates the 0x03 and 0x04 association keys for pair (a,b).
 // It reads the current weight first and deletes the old keys before writing new
 // ones, preventing stale duplicate entries from accumulating in the key space.
+// Existing metadata (relType, confidence, createdAt) is preserved; lastActivated
+// is set to now (Hebbian update = activation).
 func (ps *PebbleStore) UpdateAssocWeight(ctx context.Context, wsPrefix [8]byte, a, b ULID, weight float32) error {
 	batch := ps.db.NewBatch()
 	defer batch.Close()
 
-	// Delete old keys if a prior weight exists for this pair.
-	if oldWeight, err := ps.GetAssocWeight(ctx, wsPrefix, a, b); err == nil && oldWeight > 0 {
-		oldFwd := keys.AssocFwdKey(wsPrefix, [16]byte(a), oldWeight, [16]byte(b))
-		oldRev := keys.AssocRevKey(wsPrefix, [16]byte(b), oldWeight, [16]byte(a))
-		batch.Delete(oldFwd, nil)
-		batch.Delete(oldRev, nil)
+	// Read existing metadata before deleting old keys.
+	oldWeight, _ := ps.GetAssocWeight(ctx, wsPrefix, a, b)
+	relType, confidence, createdAt, _ := ps.getAssocValue(wsPrefix, a, b, oldWeight)
+
+	if oldWeight > 0 {
+		batch.Delete(keys.AssocFwdKey(wsPrefix, [16]byte(a), oldWeight, [16]byte(b)), nil)
+		batch.Delete(keys.AssocRevKey(wsPrefix, [16]byte(b), oldWeight, [16]byte(a)), nil)
 	}
 
-	// Weight-only update: rel_type unknown, use confidence=1.0 optimistic default
-	assocValue := encodeAssocValue(0, 1.0, time.Time{}, 0)
+	// Preserve existing metadata; set lastActivated = now (Hebbian update = activation).
+	now := int32(time.Now().Unix())
+	assocValue := encodeAssocValue(relType, confidence, createdAt, now)
 	batch.Set(keys.AssocFwdKey(wsPrefix, [16]byte(a), weight, [16]byte(b)), assocValue[:], nil)
 	batch.Set(keys.AssocRevKey(wsPrefix, [16]byte(b), weight, [16]byte(a)), assocValue[:], nil)
 
@@ -287,36 +306,37 @@ func (ps *PebbleStore) UpdateAssocWeight(ctx context.Context, wsPrefix [8]byte, 
 		return fmt.Errorf("commit batch: %w", err)
 	}
 
-	// Association list is TTL-cached; stale weights are acceptable for BFS traversal.
-
+	ps.assocCache.Remove(assocCacheKey(wsPrefix, a))
 	return nil
 }
 
 // UpdateAssocWeightBatch atomically updates multiple association weights in a single batch.
 // All updates are committed atomically — either all succeed or none do.
+// Existing metadata (relType, confidence, createdAt) is preserved per-pair;
+// lastActivated is set to now (Hebbian update = activation).
 func (ps *PebbleStore) UpdateAssocWeightBatch(ctx context.Context, updates []AssocWeightUpdate) error {
 	batch := ps.db.NewBatch()
 	defer batch.Close()
 
-	assocValue := encodeAssocValue(0, 1.0, time.Time{}, 0)
+	now := int32(time.Now().Unix())
 
 	for _, update := range updates {
-		// Delete old keys if a prior weight exists for this pair.
-		if oldWeight, err := ps.GetAssocWeight(ctx, update.WS, update.Src, update.Dst); err == nil && oldWeight > 0 {
-			oldFwd := keys.AssocFwdKey(update.WS, [16]byte(update.Src), oldWeight, [16]byte(update.Dst))
-			oldRev := keys.AssocRevKey(update.WS, [16]byte(update.Dst), oldWeight, [16]byte(update.Src))
-			batch.Delete(oldFwd, nil)
-			batch.Delete(oldRev, nil)
+		oldWeight, _ := ps.GetAssocWeight(ctx, update.WS, update.Src, update.Dst)
+		relType, confidence, createdAt, _ := ps.getAssocValue(update.WS, ULID(update.Src), ULID(update.Dst), oldWeight)
+
+		if oldWeight > 0 {
+			batch.Delete(keys.AssocFwdKey(update.WS, update.Src, oldWeight, update.Dst), nil)
+			batch.Delete(keys.AssocRevKey(update.WS, update.Dst, oldWeight, update.Src), nil)
 		}
 
-		// Set new forward and reverse keys
-		batch.Set(keys.AssocFwdKey(update.WS, [16]byte(update.Src), update.Weight, [16]byte(update.Dst)), assocValue[:], nil)
-		batch.Set(keys.AssocRevKey(update.WS, [16]byte(update.Dst), update.Weight, [16]byte(update.Src)), assocValue[:], nil)
+		assocValue := encodeAssocValue(relType, confidence, createdAt, now)
+		batch.Set(keys.AssocFwdKey(update.WS, update.Src, update.Weight, update.Dst), assocValue[:], nil)
+		batch.Set(keys.AssocRevKey(update.WS, update.Dst, update.Weight, update.Src), assocValue[:], nil)
 
 		// Update weight index.
 		var wiBuf [4]byte
 		binary.BigEndian.PutUint32(wiBuf[:], math.Float32bits(update.Weight))
-		batch.Set(keys.AssocWeightIndexKey(update.WS, [16]byte(update.Src), [16]byte(update.Dst)), wiBuf[:], nil)
+		batch.Set(keys.AssocWeightIndexKey(update.WS, update.Src, update.Dst), wiBuf[:], nil)
 	}
 
 	if err := batch.Commit(pebble.NoSync); err != nil {
