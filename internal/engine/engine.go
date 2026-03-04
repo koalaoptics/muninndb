@@ -117,10 +117,11 @@ type Engine struct {
 	autoAssoc      *autoassoc.Worker    // write-time automatic tag-based associations
 	neighborWorker *autoassoc.NeighborWorker // semantic neighbor auto-linking
 	goalLinkWorker *autoassoc.GoalLinkWorker  // goal-aware semantic auto-linking
-	noveltyDet  *novelty.Detector   // write-time near-duplicate detection
-	noveltyJobs chan noveltyJob      // async novelty work queue
-	noveltyDone chan struct{}        // signals novelty worker shutdown
-	pruneDone   chan struct{}        // signals prune worker shutdown
+	noveltyDet           *novelty.Detector // write-time near-duplicate detection
+	noveltyJobs          chan noveltyJob    // async novelty work queue
+	noveltyDone          chan struct{}      // signals novelty worker shutdown
+	pruneDone            chan struct{}      // signals prune worker shutdown
+	idempotencySweepDone chan struct{}      // signals idempotency sweep worker shutdown
 	coherence   *coherence.Registry // per-vault incremental coherence counters
 	scoring     *scoring.Store      // per-vault learnable scoring weights
 	prov        *provenance.Store   // audit trail per-engram
@@ -170,8 +171,10 @@ type Engine struct {
 	// (PruneVault, ReindexFTSVault, ClearVault). Maps string vault name → *sync.Mutex.
 	vaultMu sync.Map
 
-	// childMu serializes the read-modify-write ordinal assignment in AddChild
-	// when Ordinal is nil (append mode). Maps parent ULID string → *sync.Mutex.
+	// NOTE: childMu grows by one entry per unique parent ULID ever passed to
+	// AddChild. This is bounded by the number of distinct tree nodes in the
+	// database — it cannot grow faster than the corpus itself — so no eviction
+	// is needed.
 	childMu sync.Map
 }
 
@@ -247,8 +250,8 @@ func (e *Engine) getVaultMutex(name string) *sync.Mutex {
 // Used to serialize the read-modify-write ordinal assignment in AddChild (append mode)
 // so concurrent appends to the same parent cannot produce duplicate ordinals.
 func (e *Engine) getChildMutex(parentID string) *sync.Mutex {
-	mu, _ := e.childMu.LoadOrStore(parentID, &sync.Mutex{})
-	return mu.(*sync.Mutex)
+	v, _ := e.childMu.LoadOrStore(parentID, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 // noveltyJob is the unit of work for the async novelty worker.
@@ -355,6 +358,11 @@ func NewEngine(
 	// Only active for vaults with MaxEngrams > 0 or RetentionDays > 0.
 	go e.runPruneWorker()
 
+	// Start daily idempotency receipt sweep — purges Pebble 0x19 entries
+	// older than 30 days to prevent unbounded disk growth.
+	e.idempotencySweepDone = make(chan struct{})
+	go e.runIdempotencySweep()
+
 	return e
 }
 
@@ -447,6 +455,14 @@ func (e *Engine) Stop() {
 		// Stop the vault job GC goroutine.
 		if e.jobManager != nil {
 			e.jobManager.Close()
+		}
+		// Wait for idempotency sweep worker to exit.
+		if e.idempotencySweepDone != nil {
+			select {
+			case <-e.idempotencySweepDone:
+			case <-time.After(5 * time.Second):
+				slog.Warn("engine: idempotency sweep worker did not exit within 5s")
+			}
 		}
 	})
 }
@@ -1498,13 +1514,16 @@ func (e *Engine) activateCore(ctx context.Context, req *mbp.ActivateRequest, str
 	items := make([]mbp.ActivationItem, len(result.Activations))
 	for i, scored := range result.Activations {
 		items[i] = mbp.ActivationItem{
-			ID:         scored.Engram.ID.String(),
-			Concept:    scored.Engram.Concept,
-			Content:    scored.Engram.Content,
-			Score:      float32(scored.Score),
-			Confidence: scored.Engram.Confidence,
-			Why:        scored.Why,
-			Dormant:    scored.Dormant,
+			ID:          scored.Engram.ID.String(),
+			Concept:     scored.Engram.Concept,
+			Content:     scored.Engram.Content,
+			Score:       float32(scored.Score),
+			Confidence:  scored.Engram.Confidence,
+			Why:         scored.Why,
+			Dormant:     scored.Dormant,
+			LastAccess:  scored.Engram.LastAccess.UnixNano(),
+			AccessCount: scored.Engram.AccessCount,
+			Relevance:   scored.Engram.Relevance,
 		}
 
 		items[i].ScoreComponents = mbp.ScoreComponents{
@@ -1527,6 +1546,27 @@ func (e *Engine) activateCore(ctx context.Context, req *mbp.ActivateRequest, str
 			}
 		}
 	}
+
+	// Parallel provenance fetch — each goroutine owns its index, no mutex needed.
+	var wg sync.WaitGroup
+	for i, scored := range result.Activations {
+		if err := ctx.Err(); err != nil {
+			break
+		}
+		wg.Add(1)
+		go func(idx int, id [16]byte) {
+			defer wg.Done()
+			entries, err := e.prov.Get(ctx, wsPrefix, id)
+			if err != nil {
+				slog.Warn("activate: provenance lookup failed", "id", id, "err", err)
+				return
+			}
+			if len(entries) > 0 {
+				items[idx].SourceType = sourceTypeString(entries[len(entries)-1].Source)
+			}
+		}(i, [16]byte(scored.Engram.ID))
+	}
+	wg.Wait()
 
 	// Submit co-activations to Hebbian worker (skipped in observe mode or when disabled by Plasticity).
 	// On Lobe nodes (hebbianWorker == nil) collect refs for forwarding to Cortex instead.
@@ -2509,6 +2549,36 @@ func (e *Engine) runPruneWorker() {
 	}
 }
 
+// runIdempotencySweep is a daily background sweep that purges idempotency
+// receipts (0x19 Pebble prefix) older than 30 days. It runs immediately on
+// startup (to clean up existing accumulation) and then every 24 hours.
+func (e *Engine) runIdempotencySweep() {
+	defer close(e.idempotencySweepDone)
+	const retention = 30 * 24 * time.Hour
+	sweep := func() {
+		n, err := e.store.PurgeExpiredIdempotency(e.stopCtx, retention)
+		if err != nil && e.stopCtx.Err() == nil {
+			slog.Warn("engine: idempotency sweep error", "err", err)
+			return
+		}
+		if n > 0 {
+			slog.Info("engine: idempotency sweep purged entries", "count", n, "retention_days", 30)
+		}
+	}
+	// Run immediately so stale receipts from before this deploy are cleaned up.
+	sweep()
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			sweep()
+		case <-e.stopCtx.Done():
+			return
+		}
+	}
+}
+
 // GetNoveltyDrops returns the total number of novelty jobs dropped because the channel was full.
 func (e *Engine) GetNoveltyDrops() int64 {
 	return e.noveltyJobsDropped.Load()
@@ -2546,6 +2616,29 @@ func (e *Engine) runNoveltyWorker() {
 				e.coherence.GetOrCreate(job.vaultName).RecordLinkCreated(true, true)
 			}
 		}
+	}
+}
+
+// sourceTypeString converts a provenance.SourceType to its string representation
+// for inclusion in activation responses.
+func sourceTypeString(st provenance.SourceType) string {
+	switch st {
+	case provenance.SourceHuman:
+		return "human"
+	case provenance.SourceLLM:
+		return "llm"
+	case provenance.SourceDocument:
+		return "document"
+	case provenance.SourceInferred:
+		return "inferred"
+	case provenance.SourceExternal:
+		return "external"
+	case provenance.SourceWorkingMem:
+		return "working_memory"
+	case provenance.SourceSynthetic:
+		return "synthetic"
+	default:
+		return ""
 	}
 }
 
