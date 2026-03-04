@@ -277,19 +277,61 @@ func TestAssocDecay_LowPeakEdgeClampsToVeryLowFloor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAssociations: %v", err)
 	}
-	// Edge may be present at floor (0.003) or absent — both are valid behaviors.
-	// The key assertion is that PeakWeight was recorded correctly.
-	if len(assocs[src]) == 1 {
-		got := assocs[src][0]
-		if got.PeakWeight < 0.06-0.001 {
-			t.Errorf("PeakWeight should be ~0.06, got %.4f", got.PeakWeight)
-		}
-		// Weight should be at the very low floor
-		if got.Weight > 0.01 {
-			t.Errorf("clamped weight should be very low (<0.01), got %.4f", got.Weight)
-		}
+	if len(assocs[src]) != 1 {
+		t.Fatalf("expected edge to survive at floor (PeakWeight=0.06 → floor=0.003), got %d edges", len(assocs[src]))
 	}
-	// Either 0 or 1 edges is fine; we just verified PeakWeight correctness above.
+	got := assocs[src][0]
+	if got.PeakWeight < 0.06-0.001 {
+		t.Errorf("PeakWeight should be ~0.06, got %.4f", got.PeakWeight)
+	}
+	if got.Weight > 0.01 {
+		t.Errorf("clamped weight should be very low (<0.01), got %.4f", got.Weight)
+	}
+}
+
+// TestAssocPeakWeight_BatchUpdatePreservesPeak verifies UpdateAssocWeightBatch
+// correctly tracks PeakWeight across batch weight updates.
+func TestAssocPeakWeight_BatchUpdatePreservesPeak(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("peak-batch")
+	src, dst := NewULID(), NewULID()
+
+	// Write initial association at 0.4
+	if err := store.WriteAssociation(ctx, ws, src, dst, &Association{
+		TargetID: dst, Weight: 0.4,
+	}); err != nil {
+		t.Fatalf("WriteAssociation: %v", err)
+	}
+
+	// Batch-update to 0.9 — peak becomes 0.9
+	updates := []AssocWeightUpdate{{WS: ws, Src: src, Dst: dst, Weight: 0.9}}
+	if err := store.UpdateAssocWeightBatch(ctx, updates); err != nil {
+		t.Fatalf("UpdateAssocWeightBatch to 0.9: %v", err)
+	}
+
+	// Batch-update back to 0.2 — peak should remain 0.9
+	updates[0].Weight = 0.2
+	if err := store.UpdateAssocWeightBatch(ctx, updates); err != nil {
+		t.Fatalf("UpdateAssocWeightBatch to 0.2: %v", err)
+	}
+
+	// Read via fresh store to bypass cache
+	fresh := NewPebbleStore(store.db, PebbleStoreConfig{CacheSize: 100})
+	assocs, err := fresh.GetAssociations(ctx, ws, []ULID{src}, 10)
+	if err != nil {
+		t.Fatalf("GetAssociations: %v", err)
+	}
+	got := assocs[src]
+	if len(got) != 1 {
+		t.Fatalf("expected 1 association, got %d", len(got))
+	}
+	if got[0].PeakWeight != 0.9 {
+		t.Errorf("PeakWeight after batch update: want 0.9, got %.4f", got[0].PeakWeight)
+	}
+	if got[0].Weight != 0.2 {
+		t.Errorf("Weight after batch update: want 0.2, got %.4f", got[0].Weight)
+	}
 }
 
 // TestAssocDecay_RecencySkip verifies that an edge activated very recently

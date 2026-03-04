@@ -38,23 +38,19 @@ func decodeAssocValue(val []byte) (relType RelType, confidence float32, createdA
 	if len(val) < 18 {
 		return 0, 1.0, time.Time{}, 0, 0
 	}
-	// All-zero check: if the entire value is zero, treat as legacy pre-BUG-2-fix.
-	// Check the full slice length so that a 22-byte value with a non-zero peakWeight
-	// tail is not incorrectly classified as legacy (e.g. relType=0, confidence=0.0).
-	checkLen := len(val)
-	if checkLen > 22 {
-		checkLen = 22
-	}
-	allZero := true
-	for _, b := range val[:checkLen] {
-		if b != 0 {
-			allZero = false
-			break
+	// All-zero 18-byte values are pre-fix legacy (old encoder wrote blank values).
+	// 22-byte values are from the new encoder and always carry real metadata.
+	if len(val) == 18 {
+		allZero := true
+		for _, b := range val {
+			if b != 0 {
+				allZero = false
+				break
+			}
 		}
-	}
-	if allZero {
-		// Legacy association written before BUG-2 fix; use optimistic defaults.
-		return 0, 1.0, time.Time{}, 0, 0
+		if allZero {
+			return 0, 1.0, time.Time{}, 0, 0
+		}
 	}
 	relType = RelType(binary.BigEndian.Uint16(val[0:2]))
 	confidence = math.Float32frombits(binary.BigEndian.Uint32(val[2:6]))
@@ -369,10 +365,27 @@ func (ps *PebbleStore) UpdateAssocWeightBatch(ctx context.Context, updates []Ass
 		return fmt.Errorf("commit batch: %w", err)
 	}
 
+	// Invalidate assoc cache for all updated source nodes.
+	// Deduplicate to avoid redundant removals when a source appears multiple times.
+	seen := make(map[[24]byte]struct{}, len(updates))
+	for _, update := range updates {
+		ck := assocCacheKey(update.WS, update.Src)
+		if _, ok := seen[ck]; !ok {
+			seen[ck] = struct{}{}
+			ps.assocCache.Remove(ck)
+		}
+	}
 	return nil
 }
 
 const assocDecayChunkSize = 10_000
+
+// assocDecayGraceWindow is the minimum time since lastActivated before an
+// association is eligible for weight decay. Edges activated within this window
+// are skipped on the decay pass, protecting recently-used associations from
+// being penalized by the next scheduled consolidation run.
+// TODO: make this configurable per vault via PlasticityConfig.
+const assocDecayGraceWindow = 5 * time.Minute
 
 // DecayAssocWeights multiplies all association weights for wsPrefix by decayFactor,
 // deleting entries that fall below minWeight. Returns count of deleted entries.
@@ -457,10 +470,9 @@ func (ps *PebbleStore) DecayAssocWeights(ctx context.Context, wsPrefix [8]byte, 
 		// Recency skip: associations activated within the grace window are not decayed.
 		// Window must be > a few seconds (to protect edges just activated) but
 		// < 30 minutes (so edges activated 30 min ago are still eligible for decay).
-		const decayGraceWindow = 5 * time.Minute
 		if lastActivated > 0 {
 			activatedAt := time.Unix(int64(lastActivated), 0)
-			if time.Since(activatedAt) < decayGraceWindow {
+			if time.Since(activatedAt) < assocDecayGraceWindow {
 				continue // skip — recently used, leave key untouched
 			}
 		}
