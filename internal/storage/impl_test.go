@@ -431,7 +431,7 @@ func TestUpdateAssocWeight(t *testing.T) {
 	}
 
 	// Update weight to 0.9
-	err = store.UpdateAssocWeight(ctx, ws, id1, id2, 0.9)
+	err = store.UpdateAssocWeight(ctx, ws, id1, id2, 0.9, 0)
 	if err != nil {
 		t.Fatalf("UpdateAssocWeight: %v", err)
 	}
@@ -701,9 +701,9 @@ func TestUpdateAssocWeightNoDuplicateEdges(t *testing.T) {
 
 	// Write initial association then update weight three times
 	_ = store.WriteAssociation(ctx, ws, id1, id2, &Association{TargetID: id2, Weight: 0.3})
-	_ = store.UpdateAssocWeight(ctx, ws, id1, id2, 0.5)
-	_ = store.UpdateAssocWeight(ctx, ws, id1, id2, 0.7)
-	_ = store.UpdateAssocWeight(ctx, ws, id1, id2, 0.9)
+	_ = store.UpdateAssocWeight(ctx, ws, id1, id2, 0.5, 0)
+	_ = store.UpdateAssocWeight(ctx, ws, id1, id2, 0.7, 0)
+	_ = store.UpdateAssocWeight(ctx, ws, id1, id2, 0.9, 0)
 
 	// Scan all forward-assoc keys for the pair and count distinct weight-encoded entries.
 	// There must be exactly 1 — if old keys weren't deleted, there'd be multiple.

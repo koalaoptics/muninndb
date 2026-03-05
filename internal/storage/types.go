@@ -100,12 +100,14 @@ type EngramMeta struct {
 // Association represents a directed, weighted link between two engrams.
 // Fixed-size: 40 bytes on disk.
 type Association struct {
-	TargetID      ULID
-	RelType       RelType
-	Weight        float32 // 0.0-1.0, Hebbian-adjustable
-	Confidence    float32 // 0.0-1.0
-	CreatedAt     time.Time
-	LastActivated int32 // Unix seconds (not nanoseconds; int32 is sufficient)
+	TargetID          ULID
+	RelType           RelType
+	Weight            float32 // 0.0-1.0, Hebbian-adjustable
+	Confidence        float32 // 0.0-1.0
+	CreatedAt         time.Time
+	LastActivated     int32   // Unix seconds (not nanoseconds; int32 is sufficient)
+	PeakWeight        float32 // historical max Weight; 0 = untracked (legacy pre-upgrade)
+	CoActivationCount uint32  // lifetime Hebbian co-activation count; 0 = pre-feature/unknown
 }
 
 // LifecycleState is the engram state machine (uint8 on disk).

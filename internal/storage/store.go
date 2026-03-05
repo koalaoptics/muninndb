@@ -7,10 +7,11 @@ import (
 
 // AssocWeightUpdate represents a single association weight update for batching.
 type AssocWeightUpdate struct {
-	WS     [8]byte
-	Src    ULID
-	Dst    ULID
-	Weight float32
+	WS         [8]byte
+	Src        ULID
+	Dst        ULID
+	Weight     float32
+	CountDelta uint32 // Hebbian co-activation increment to add to CoActivationCount
 }
 
 // OrdinalEntry is a (childID, ordinal) pair returned by ListChildOrdinals.
@@ -93,7 +94,8 @@ type EngineStore interface {
 	GetAssocWeight(ctx context.Context, wsPrefix [8]byte, a, b ULID) (float32, error)
 
 	// UpdateAssocWeight writes/updates the 0x03 and 0x04 association keys for pair (a,b).
-	UpdateAssocWeight(ctx context.Context, wsPrefix [8]byte, a, b ULID, weight float32) error
+	// countDelta is added to the existing CoActivationCount (saturating at MaxUint32).
+	UpdateAssocWeight(ctx context.Context, wsPrefix [8]byte, a, b ULID, weight float32, countDelta uint32) error
 
 	// DecayAssocWeights multiplies all association weights for wsPrefix by decayFactor,
 	// deleting entries that fall below minWeight. Returns count deleted.

@@ -32,10 +32,11 @@ type HebbianStore interface {
 
 // AssocWeightUpdate represents a single weight update for batching.
 type AssocWeightUpdate struct {
-	WS  [8]byte
-	Src [16]byte
-	Dst [16]byte
-	Weight float32
+	WS         [8]byte
+	Src        [16]byte
+	Dst        [16]byte
+	Weight     float32
+	CountDelta uint32 // number of co-activations observed for this pair in the batch
 }
 
 // CoActivationEvent records a set of engrams that were retrieved together.
@@ -228,11 +229,19 @@ func (hw *HebbianWorker) processBatch(ctx context.Context, batch []CoActivationE
 		logNew := math.Log(float64(current)) + effectiveSignal*math.Log(1.0+HebbianLearningRate)
 		newWeight := float32(math.Min(1.0, math.Exp(logNew)))
 
+		var countDelta uint32
+		if stats.count > math.MaxUint32 {
+			countDelta = math.MaxUint32
+		} else {
+			countDelta = uint32(stats.count)
+		}
+
 		updates = append(updates, AssocWeightUpdate{
-			WS:     stats.ws,
-			Src:    pair.a,
-			Dst:    pair.b,
-			Weight: newWeight,
+			WS:         stats.ws,
+			Src:        pair.a,
+			Dst:        pair.b,
+			Weight:     newWeight,
+			CountDelta: countDelta,
 		})
 
 		if hw.OnWeightUpdate != nil {

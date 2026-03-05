@@ -14,7 +14,10 @@ func (a *benchHebbianAdapter) GetAssocWeight(ctx context.Context, ws [8]byte, sr
 	return a.store.GetAssocWeight(ctx, ws, storage.ULID(src), storage.ULID(dst))
 }
 func (a *benchHebbianAdapter) UpdateAssocWeight(ctx context.Context, ws [8]byte, src, dst [16]byte, w float32) error {
-	return a.store.UpdateAssocWeight(ctx, ws, storage.ULID(src), storage.ULID(dst), w)
+	// This path is only used outside of processBatch (e.g., tests, manual adjustments).
+	// CountDelta is 0 because this is a weight-only update — co-activation count
+	// is accumulated exclusively through UpdateAssocWeightBatch in processBatch.
+	return a.store.UpdateAssocWeight(ctx, ws, storage.ULID(src), storage.ULID(dst), w, 0)
 }
 func (a *benchHebbianAdapter) DecayAssocWeights(ctx context.Context, ws [8]byte, factor float64, min float32) (int, error) {
 	return a.store.DecayAssocWeights(ctx, ws, factor, min)
@@ -23,10 +26,11 @@ func (a *benchHebbianAdapter) UpdateAssocWeightBatch(ctx context.Context, update
 	storageUpdates := make([]storage.AssocWeightUpdate, len(updates))
 	for i, u := range updates {
 		storageUpdates[i] = storage.AssocWeightUpdate{
-			WS:     u.WS,
-			Src:    storage.ULID(u.Src),
-			Dst:    storage.ULID(u.Dst),
-			Weight: u.Weight,
+			WS:         u.WS,
+			Src:        storage.ULID(u.Src),
+			Dst:        storage.ULID(u.Dst),
+			Weight:     u.Weight,
+			CountDelta: u.CountDelta,
 		}
 	}
 	return a.store.UpdateAssocWeightBatch(ctx, storageUpdates)

@@ -21,7 +21,10 @@ func (a *hebbianStoreAdapter) GetAssocWeight(ctx context.Context, ws [8]byte, sr
 }
 
 func (a *hebbianStoreAdapter) UpdateAssocWeight(ctx context.Context, ws [8]byte, src, dst [16]byte, weight float32) error {
-	return a.store.UpdateAssocWeight(ctx, ws, storage.ULID(src), storage.ULID(dst), weight)
+	// This path is only used outside of processBatch (e.g., tests, manual adjustments).
+	// CountDelta is 0 because this is a weight-only update — co-activation count
+	// is accumulated exclusively through UpdateAssocWeightBatch in processBatch.
+	return a.store.UpdateAssocWeight(ctx, ws, storage.ULID(src), storage.ULID(dst), weight, 0)
 }
 
 func (a *hebbianStoreAdapter) DecayAssocWeights(ctx context.Context, ws [8]byte, decayFactor float64, minWeight float32) (int, error) {
@@ -32,10 +35,11 @@ func (a *hebbianStoreAdapter) UpdateAssocWeightBatch(ctx context.Context, update
 	storageUpdates := make([]storage.AssocWeightUpdate, len(updates))
 	for i, u := range updates {
 		storageUpdates[i] = storage.AssocWeightUpdate{
-			WS:     u.WS,
-			Src:    storage.ULID(u.Src),
-			Dst:    storage.ULID(u.Dst),
-			Weight: u.Weight,
+			WS:         u.WS,
+			Src:        storage.ULID(u.Src),
+			Dst:        storage.ULID(u.Dst),
+			Weight:     u.Weight,
+			CountDelta: u.CountDelta,
 		}
 	}
 	return a.store.UpdateAssocWeightBatch(ctx, storageUpdates)
