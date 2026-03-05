@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"encoding/binary"
+	"math"
 	"testing"
 	"time"
 
@@ -653,6 +655,42 @@ func TestGetAssociations_ReturnsCopy(t *testing.T) {
 	}
 	if !seen[dst1] || !seen[dst2] {
 		t.Error("original associations missing in fresh call")
+	}
+}
+
+// TestRestoredAt_ClearedAfterReestablishment verifies that restoredAt is cleared
+// when an edge accumulates 3+ co-activations post-restore.
+func TestRestoredAt_ClearedAfterReestablishment(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	ws := store.VaultPrefix("restored-clear")
+
+	src := NewULID()
+	dst := NewULID()
+
+	// Write a restored edge (simulate via archive value written to live keys).
+	now := int32(time.Now().Unix())
+	restoreWeight := float32(0.25)
+	val := encodeArchiveValue(RelSupports, 0.9, time.Now().Add(-72*time.Hour), now, 1.0, 5, now)
+	fwdKey := keys.AssocFwdKey(ws, [16]byte(src), restoreWeight, [16]byte(dst))
+	store.db.Set(fwdKey, val[:], nil)
+	revKey := keys.AssocRevKey(ws, [16]byte(dst), restoreWeight, [16]byte(src))
+	store.db.Set(revKey, val[:], nil)
+	var wiBuf [4]byte
+	binary.BigEndian.PutUint32(wiBuf[:], math.Float32bits(restoreWeight))
+	store.db.Set(keys.AssocWeightIndexKey(ws, [16]byte(src), [16]byte(dst)), wiBuf[:], nil)
+
+	// Update weight 3 times (3 co-activations post-restore).
+	for i := 0; i < 3; i++ {
+		if err := store.UpdateAssocWeight(ctx, ws, src, dst, restoreWeight+float32(i)*0.01, 1); err != nil {
+			t.Fatalf("UpdateAssocWeight[%d]: %v", i, err)
+		}
+	}
+
+	// Read back and verify restoredAt is cleared.
+	_, _, _, _, _, _, restoredAt := store.getAssocValueFull(ws, src, dst)
+	if restoredAt != 0 {
+		t.Errorf("restoredAt should be cleared after 3 co-activations, got %v", restoredAt)
 	}
 }
 

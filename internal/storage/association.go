@@ -320,19 +320,40 @@ func (ps *PebbleStore) getAssocValue(wsPrefix [8]byte, a, b ULID, knownWeight fl
 	return
 }
 
+// getAssocValueFull reads all 7 decoded fields for pair (a→b), including restoredAt.
+// Uses GetAssocWeight to determine the current weight, then reads the forward key.
+// Returns zero values (with confidence=1.0) if no association exists.
+func (ps *PebbleStore) getAssocValueFull(wsPrefix [8]byte, a, b ULID) (RelType, float32, time.Time, int32, float32, uint32, int32) {
+	w, _ := ps.GetAssocWeight(context.Background(), wsPrefix, a, b)
+	if w <= 0 {
+		return 0, 1.0, time.Time{}, 0, 0, 0, 0
+	}
+	fwdKey := keys.AssocFwdKey(wsPrefix, [16]byte(a), w, [16]byte(b))
+	val, err := Get(ps.db, fwdKey)
+	if err != nil || val == nil {
+		return 0, 1.0, time.Time{}, 0, 0, 0, 0
+	}
+	return decodeAssocValue(val)
+}
+
 // UpdateAssocWeight writes/updates the 0x03 and 0x04 association keys for pair (a,b).
 // It reads the current weight first and deletes the old keys before writing new
 // ones, preventing stale duplicate entries from accumulating in the key space.
 // Existing metadata (relType, confidence, createdAt) is preserved; lastActivated
 // is set to now (Hebbian update = activation).
 // countDelta is added to the existing CoActivationCount (saturating at MaxUint32).
+// If the edge was previously restored (restoredAt != 0), restoredAt is cleared once
+// the edge re-establishes itself: 3+ co-activations post-restore OR weight exceeds
+// restoreWeight * 1.5 (where restoreWeight = existingPeak * 0.25).
 func (ps *PebbleStore) UpdateAssocWeight(ctx context.Context, wsPrefix [8]byte, a, b ULID, weight float32, countDelta uint32) error {
 	batch := ps.db.NewBatch()
 	defer batch.Close()
 
-	// Read existing metadata before deleting old keys.
+	// Read existing metadata (all 7 fields) before deleting old keys.
+	// getAssocValueFull does its own GetAssocWeight internally; capture oldWeight
+	// separately so we can delete the old fwd/rev keys.
 	oldWeight, _ := ps.GetAssocWeight(ctx, wsPrefix, a, b)
-	relType, confidence, createdAt, _, existingPeak, existingCoAct := ps.getAssocValue(wsPrefix, a, b, oldWeight)
+	relType, confidence, createdAt, _, existingPeak, existingCoAct, existingRestoredAt := ps.getAssocValueFull(wsPrefix, a, b)
 
 	if oldWeight > 0 {
 		batch.Delete(keys.AssocFwdKey(wsPrefix, [16]byte(a), oldWeight, [16]byte(b)), nil)
@@ -355,9 +376,33 @@ func (ps *PebbleStore) UpdateAssocWeight(ctx context.Context, wsPrefix [8]byte, 
 			newCoAct += countDelta
 		}
 	}
-	assocValue := encodeAssocValue(relType, confidence, createdAt, now, newPeak, newCoAct)
-	batch.Set(keys.AssocFwdKey(wsPrefix, [16]byte(a), weight, [16]byte(b)), assocValue[:], nil)
-	batch.Set(keys.AssocRevKey(wsPrefix, [16]byte(b), weight, [16]byte(a)), assocValue[:], nil)
+
+	// Clear restoredAt if the edge has re-established itself post-restore.
+	// Clearing conditions (either is sufficient):
+	//   - coActivationCount has reached 3+ (incremental activations accumulate across calls), OR
+	//   - weight exceeds restoreWeight * 1.5 (restoreWeight ≈ existingPeak * 0.25).
+	// We use an absolute coActivationCount threshold of 3 because the count at restore time
+	// is not separately tracked; newly restored edges start at the archive's count value and
+	// each UpdateAssocWeight call increments it, so the threshold is met after enough calls.
+	outRestoredAt := existingRestoredAt
+	if outRestoredAt != 0 {
+		restoreWeight := existingPeak * 0.25
+		if newCoAct >= existingCoAct+3 || newCoAct >= 3 || weight > restoreWeight*1.5 {
+			outRestoredAt = 0
+		}
+	}
+
+	// Encode: use 30-byte archive format when the edge has (or had) a restoredAt,
+	// to avoid silently dropping that field. Use compact 26-byte format otherwise.
+	if existingRestoredAt != 0 || outRestoredAt != 0 {
+		v := encodeArchiveValue(relType, confidence, createdAt, now, newPeak, newCoAct, outRestoredAt)
+		batch.Set(keys.AssocFwdKey(wsPrefix, [16]byte(a), weight, [16]byte(b)), v[:], nil)
+		batch.Set(keys.AssocRevKey(wsPrefix, [16]byte(b), weight, [16]byte(a)), v[:], nil)
+	} else {
+		v := encodeAssocValue(relType, confidence, createdAt, now, newPeak, newCoAct)
+		batch.Set(keys.AssocFwdKey(wsPrefix, [16]byte(a), weight, [16]byte(b)), v[:], nil)
+		batch.Set(keys.AssocRevKey(wsPrefix, [16]byte(b), weight, [16]byte(a)), v[:], nil)
+	}
 
 	// Update weight index.
 	var wiBuf [4]byte
@@ -384,7 +429,7 @@ func (ps *PebbleStore) UpdateAssocWeightBatch(ctx context.Context, updates []Ass
 
 	for _, update := range updates {
 		oldWeight, _ := ps.GetAssocWeight(ctx, update.WS, update.Src, update.Dst)
-		relType, confidence, createdAt, _, existingPeak, existingCoAct := ps.getAssocValue(update.WS, ULID(update.Src), ULID(update.Dst), oldWeight)
+		relType, confidence, createdAt, _, existingPeak, existingCoAct, existingRestoredAt := ps.getAssocValueFull(update.WS, ULID(update.Src), ULID(update.Dst))
 
 		if oldWeight > 0 {
 			batch.Delete(keys.AssocFwdKey(update.WS, update.Src, oldWeight, update.Dst), nil)
@@ -405,9 +450,28 @@ func (ps *PebbleStore) UpdateAssocWeightBatch(ctx context.Context, updates []Ass
 				newCoAct += update.CountDelta
 			}
 		}
-		assocValue := encodeAssocValue(relType, confidence, createdAt, now, newPeak, newCoAct)
-		batch.Set(keys.AssocFwdKey(update.WS, update.Src, update.Weight, update.Dst), assocValue[:], nil)
-		batch.Set(keys.AssocRevKey(update.WS, update.Dst, update.Weight, update.Src), assocValue[:], nil)
+
+		// Clear restoredAt if the edge has re-established itself post-restore.
+		// Same conditions as UpdateAssocWeight: absolute coActivationCount >= 3
+		// OR newCoAct increased by 3+ in this call OR weight > restoreWeight*1.5.
+		outRestoredAt := existingRestoredAt
+		if outRestoredAt != 0 {
+			restoreWeight := existingPeak * 0.25
+			if newCoAct >= existingCoAct+3 || newCoAct >= 3 || update.Weight > restoreWeight*1.5 {
+				outRestoredAt = 0
+			}
+		}
+
+		// Encode: use 30-byte archive format when the edge has (or had) a restoredAt.
+		if existingRestoredAt != 0 || outRestoredAt != 0 {
+			v := encodeArchiveValue(relType, confidence, createdAt, now, newPeak, newCoAct, outRestoredAt)
+			batch.Set(keys.AssocFwdKey(update.WS, update.Src, update.Weight, update.Dst), v[:], nil)
+			batch.Set(keys.AssocRevKey(update.WS, update.Dst, update.Weight, update.Src), v[:], nil)
+		} else {
+			v := encodeAssocValue(relType, confidence, createdAt, now, newPeak, newCoAct)
+			batch.Set(keys.AssocFwdKey(update.WS, update.Src, update.Weight, update.Dst), v[:], nil)
+			batch.Set(keys.AssocRevKey(update.WS, update.Dst, update.Weight, update.Src), v[:], nil)
+		}
 
 		// Update weight index.
 		var wiBuf [4]byte
