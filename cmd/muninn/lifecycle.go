@@ -165,15 +165,22 @@ func runStop() {
 		os.Exit(1)
 	}
 
-	// Wait for the process to actually exit (up to 5s) so that restart
-	// doesn't race with the old process still holding the ports.
-	deadline := time.Now().Add(5 * time.Second)
+	// Wait for the process to actually exit (up to 15s) so that restart
+	// doesn't race with the old process still holding the Pebble DB lock.
+	// Pebble's graceful shutdown (WAL flush + fsync) can take several seconds,
+	// so 15s gives ample headroom for slow disks or large write buffers.
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if !isProcessRunning(pid) {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+
+	// Brief pause after process exit to allow the OS to fully release file
+	// handles (including the Pebble lock file) before the next instance opens
+	// the same database directory.
+	time.Sleep(300 * time.Millisecond)
 
 	fmt.Printf("muninn stopped (pid %d)\n", pid)
 	os.Remove(pidPath)
