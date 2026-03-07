@@ -118,6 +118,14 @@ func (m *MockEngine) GetEngramLinks(ctx context.Context, req *GetEngramLinksRequ
 	return &GetEngramLinksResponse{Links: []AssociationItem{}}, nil
 }
 
+func (m *MockEngine) GetBatchEngramLinks(ctx context.Context, req *BatchGetEngramLinksRequest) (*BatchGetEngramLinksResponse, error) {
+	links := make(map[string][]AssociationItem, len(req.IDs))
+	for _, id := range req.IDs {
+		links[id] = []AssociationItem{}
+	}
+	return &BatchGetEngramLinksResponse{Links: links}, nil
+}
+
 func (m *MockEngine) ListVaults(ctx context.Context) ([]string, error) {
 	return []string{"default"}, nil
 }
@@ -604,6 +612,10 @@ func (e *errorEngine) GetSession(ctx context.Context, req *GetSessionRequest) (*
 }
 func (e *errorEngine) GetEngramLinks(ctx context.Context, req *GetEngramLinksRequest) (*GetEngramLinksResponse, error) {
 	return nil, fmt.Errorf("storage error")
+}
+
+func (e *errorEngine) GetBatchEngramLinks(ctx context.Context, req *BatchGetEngramLinksRequest) (*BatchGetEngramLinksResponse, error) {
+	return nil, fmt.Errorf("engine error")
 }
 
 func TestListEngramsEngineError(t *testing.T) {
@@ -2086,5 +2098,89 @@ func TestHandleVaultStats_RequiresAdminAuth(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 without auth, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestBatchGetEngramLinks_HappyPath(t *testing.T) {
+	server := NewServer("localhost:8080", &MockEngine{}, nil, nil, nil, EmbedInfo{}, EnrichInfo{}, nil, "", nil)
+	body := `{"ids":["01JAAAAAAAAAAAAAAAAAAAAAA1","01JAAAAAAAAAAAAAAAAAAAAAA2"],"vault":"default"}`
+	req := httptest.NewRequest("POST", "/api/engrams/links/batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d: %s", w.Code, w.Body.String())
+	}
+	var out BatchGetEngramLinksResponse
+	json.NewDecoder(w.Body).Decode(&out)
+	if out.Links == nil {
+		t.Fatal("Links map must not be nil")
+	}
+	// Both IDs must be present (even with empty slices from MockEngine)
+	for _, id := range []string{"01JAAAAAAAAAAAAAAAAAAAAAA1", "01JAAAAAAAAAAAAAAAAAAAAAA2"} {
+		if _, ok := out.Links[id]; !ok {
+			t.Errorf("Links map missing key %s", id)
+		}
+	}
+}
+
+func TestBatchGetEngramLinks_EmptyIDs(t *testing.T) {
+	server := NewServer("localhost:8080", &MockEngine{}, nil, nil, nil, EmbedInfo{}, EnrichInfo{}, nil, "", nil)
+	req := httptest.NewRequest("POST", "/api/engrams/links/batch", strings.NewReader(`{"ids":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 got %d", w.Code)
+	}
+}
+
+func TestBatchGetEngramLinks_MissingIDs(t *testing.T) {
+	server := NewServer("localhost:8080", &MockEngine{}, nil, nil, nil, EmbedInfo{}, EnrichInfo{}, nil, "", nil)
+	req := httptest.NewRequest("POST", "/api/engrams/links/batch", strings.NewReader(`{"vault":"default"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 got %d", w.Code)
+	}
+}
+
+func TestBatchGetEngramLinks_TooManyIDs(t *testing.T) {
+	server := NewServer("localhost:8080", &MockEngine{}, nil, nil, nil, EmbedInfo{}, EnrichInfo{}, nil, "", nil)
+	ids := make([]string, 201)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("01JAAAAAAAAAAAAAAAAAAAAAA%01d", i%10)
+	}
+	b, _ := json.Marshal(map[string]any{"ids": ids})
+	req := httptest.NewRequest("POST", "/api/engrams/links/batch", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 got %d", w.Code)
+	}
+}
+
+func TestBatchGetEngramLinks_BadJSON(t *testing.T) {
+	server := NewServer("localhost:8080", &MockEngine{}, nil, nil, nil, EmbedInfo{}, EnrichInfo{}, nil, "", nil)
+	req := httptest.NewRequest("POST", "/api/engrams/links/batch", strings.NewReader(`{not json}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 got %d", w.Code)
+	}
+}
+
+func TestBatchGetEngramLinks_EngineError(t *testing.T) {
+	server := NewServer("localhost:8080", &errorEngine{}, nil, nil, nil, EmbedInfo{}, EnrichInfo{}, nil, "", nil)
+	body := `{"ids":["01JAAAAAAAAAAAAAAAAAAAAAA1"],"vault":"default"}`
+	req := httptest.NewRequest("POST", "/api/engrams/links/batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500 got %d", w.Code)
 	}
 }
