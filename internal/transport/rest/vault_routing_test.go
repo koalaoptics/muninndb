@@ -107,3 +107,45 @@ func TestVaultRouting_Write_ExplicitVault(t *testing.T) {
 		t.Errorf("engine Write vault: want %q, got %q", "myvault", eng.lastWriteVault)
 	}
 }
+
+// TestVaultRouting_Activate_ExplicitVault verifies that POST /api/activate?vault=myvault
+// passes "myvault" to the engine.
+func TestVaultRouting_Activate_ExplicitVault(t *testing.T) {
+	srv, eng, store := newVaultTrackingServer(t)
+	if err := store.SetVaultConfig(auth.VaultConfig{Name: "myvault", Public: true}); err != nil {
+		t.Fatalf("SetVaultConfig: %v", err)
+	}
+
+	body := strings.NewReader(`{"context":["something"]}`)
+	req := httptest.NewRequest("POST", "/api/activate?vault=myvault", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if eng.lastActivateVault != "myvault" {
+		t.Errorf("engine Activate vault: want %q, got %q", "myvault", eng.lastActivateVault)
+	}
+}
+
+// TestVaultRouting_ListEngrams_ExplicitVault verifies that GET /api/engrams?vault=myvault
+// passes "myvault" to the engine.
+func TestVaultRouting_ListEngrams_ExplicitVault(t *testing.T) {
+	srv, eng, store := newVaultTrackingServer(t)
+	if err := store.SetVaultConfig(auth.VaultConfig{Name: "myvault", Public: true}); err != nil {
+		t.Fatalf("SetVaultConfig: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/engrams?vault=myvault", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if eng.lastListVault != "myvault" {
+		t.Errorf("engine ListEngrams vault: want %q, got %q", "myvault", eng.lastListVault)
+	}
+}
