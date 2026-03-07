@@ -36,8 +36,9 @@ type vaultTrackingEngine struct {
 	lastUpdateTagsVault         string
 	lastListDeletedVault        string
 	lastRetryEnrichVault        string
-	lastGetContradictionsVault  string
-	lastGetGuideVault           string
+	lastGetContradictionsVault      string
+	lastResolveContradictionVault   string
+	lastGetGuideVault               string
 }
 
 func (e *vaultTrackingEngine) Write(ctx context.Context, req *WriteRequest) (*WriteResponse, error) {
@@ -150,6 +151,11 @@ func (e *vaultTrackingEngine) RetryEnrich(ctx context.Context, vault, engramID s
 func (e *vaultTrackingEngine) GetContradictions(ctx context.Context, vault string) (*ContradictionsResponse, error) {
 	e.lastGetContradictionsVault = vault
 	return e.MockEngine.GetContradictions(ctx, vault)
+}
+
+func (e *vaultTrackingEngine) ResolveContradiction(ctx context.Context, vault, idA, idB string) error {
+	e.lastResolveContradictionVault = vault
+	return e.MockEngine.ResolveContradiction(ctx, vault, idA, idB)
 }
 
 func (e *vaultTrackingEngine) GetGuide(ctx context.Context, vault string) (string, error) {
@@ -354,7 +360,9 @@ func TestVaultRouting_Forget_ExplicitVault(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
 
-	// MockEngine.Forget returns &ForgetResponse{OK: true} with nil error; check vault was forwarded.
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
 	if eng.lastForgetVault != "myvault" {
 		t.Errorf("engine Forget vault: want %q, got %q", "myvault", eng.lastForgetVault)
 	}
@@ -737,5 +745,27 @@ func TestVaultRouting_GetGuide_ExplicitVault(t *testing.T) {
 	}
 	if eng.lastGetGuideVault != "myvault" {
 		t.Errorf("engine GetGuide vault: want %q, got %q", "myvault", eng.lastGetGuideVault)
+	}
+}
+
+// TestVaultRouting_ResolveContradiction_ExplicitVault verifies that
+// POST /api/admin/contradictions/resolve passes the vault from the request body to the engine.
+// Note: this is an admin endpoint; vault is not set via ?vault= query param but via the body's
+// "vault" field, since withAdminMiddleware does not run VaultAuthMiddleware.
+func TestVaultRouting_ResolveContradiction_ExplicitVault(t *testing.T) {
+	srv, eng, _ := newVaultTrackingServer(t)
+
+	// sessionSecret is "" in the test server, so admin auth is skipped.
+	body := strings.NewReader(`{"vault":"myvault","id_a":"a1","id_b":"b1"}`)
+	req := httptest.NewRequest("POST", "/api/admin/contradictions/resolve", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if eng.lastResolveContradictionVault != "myvault" {
+		t.Errorf("engine ResolveContradiction vault: want %q, got %q", "myvault", eng.lastResolveContradictionVault)
 	}
 }
