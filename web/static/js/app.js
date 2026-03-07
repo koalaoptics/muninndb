@@ -2618,7 +2618,10 @@ document.addEventListener('alpine:init', () => {
 
     // ── Decide ─────────────────────────────────────────────────────────────
     openDecideModal() {
-      this.decideModal = { show: true, decision: '', rationale: '', alternatives: '', evidenceIds: '' };
+      const evidenceIds = this.selectedMemoryIds.length > 0
+        ? this.selectedMemoryIds.join('\n')
+        : '';
+      this.decideModal = { show: true, decision: '', rationale: '', alternatives: '', evidenceIds };
     },
 
     async submitDecide() {
