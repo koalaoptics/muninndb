@@ -41,11 +41,11 @@ type mockPluginStore struct {
 	coOccurCalls      int
 }
 
-func (m *mockPluginStore) CountWithoutFlag(_ context.Context, _ uint8) (int64, error) {
+func (m *mockPluginStore) CountWithoutFlag(_ context.Context, _, _ uint8) (int64, error) {
 	return m.countResult, m.countErr
 }
 
-func (m *mockPluginStore) ScanWithoutFlag(_ context.Context, _ uint8) EngramIterator {
+func (m *mockPluginStore) ScanWithoutFlag(_ context.Context, _, _ uint8) EngramIterator {
 	return m.scanResult
 }
 

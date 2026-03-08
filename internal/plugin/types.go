@@ -56,6 +56,11 @@ const (
 	DigestRelationships uint8 = 0x10 // relationship extraction complete
 	DigestClassified    uint8 = 0x20 // classification complete
 	DigestSummarized    uint8 = 0x40 // summarization complete
+
+	// DigestEmbedFailed is set when an embed batch permanently fails for an engram.
+	// Engrams with this flag are skipped by the embed retroactive processor so
+	// they are not retried indefinitely.
+	DigestEmbedFailed uint8 = 0x80
 )
 
 // PluginStatus represents the runtime state of a registered plugin.

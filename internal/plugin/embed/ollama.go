@@ -26,6 +26,14 @@ type ollamaEmbedResponse struct {
 	Embedding []float64 `json:"embedding"`
 }
 
+type ollamaShowRequest struct {
+	Name string `json:"name"`
+}
+
+type ollamaShowResponse struct {
+	ModelInfo map[string]any `json:"model_info"`
+}
+
 func (p *OllamaProvider) Name() string {
 	return "ollama"
 }
@@ -60,6 +68,10 @@ func (p *OllamaProvider) Init(ctx context.Context, cfg ProviderHTTPConfig) (int,
 		return 0, fmt.Errorf("cannot connect to Ollama at %s — is it running? (%w)", p.baseURL, err)
 	}
 	resp.Body.Close()
+
+	// Probe model info to warn about small context windows.
+	// A short context window causes long engrams to be silently truncated.
+	p.probeContextLength(ctx)
 
 	// Embed probe text to detect dimension
 	embedCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -147,6 +159,58 @@ func (p *OllamaProvider) EmbedBatch(ctx context.Context, texts []string) ([]floa
 func (p *OllamaProvider) MaxBatchSize() int {
 	// Ollama embeds one at a time
 	return 1
+}
+
+// probeContextLength queries /api/show for model info and logs a warning when
+// the model's context window is below 2048 tokens, which risks silent truncation
+// of longer engram content.
+func (p *OllamaProvider) probeContextLength(ctx context.Context) {
+	showCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	body, _ := json.Marshal(ollamaShowRequest{Name: p.model})
+	req, err := http.NewRequestWithContext(showCtx, "POST", p.baseURL+"/api/show", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	var show ollamaShowResponse
+	if err := json.NewDecoder(resp.Body).Decode(&show); err != nil {
+		return
+	}
+
+	// The context length is stored under a model-family-specific key in model_info.
+	// Common keys: "llama.context_length", "bert.context_length", etc.
+	const warnThreshold = 2048
+	for k, v := range show.ModelInfo {
+		if k != "llama.context_length" && k != "bert.context_length" &&
+			k != "nomic_bert.context_length" && k != "qwen2.context_length" {
+			continue
+		}
+		switch n := v.(type) {
+		case float64:
+			if int(n) < warnThreshold {
+				slog.Warn("Ollama model has a small context window — long engrams may be truncated",
+					"model", p.model,
+					"context_length", int(n),
+					"recommended_minimum", warnThreshold)
+			} else {
+				slog.Info("Ollama context length", "model", p.model, "context_length", int(n))
+			}
+		}
+		return
+	}
 }
 
 func (p *OllamaProvider) Close() error {

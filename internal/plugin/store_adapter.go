@@ -20,12 +20,12 @@ func NewStoreAdapter(store *storage.PebbleStore, hnsw *hnswpkg.Registry) PluginS
 	return &pluginStoreAdapter{store: store, hnsw: hnsw}
 }
 
-func (a *pluginStoreAdapter) CountWithoutFlag(ctx context.Context, flag uint8) (int64, error) {
-	return a.store.CountWithoutFlag(ctx, flag)
+func (a *pluginStoreAdapter) CountWithoutFlag(ctx context.Context, flag, skipFlags uint8) (int64, error) {
+	return a.store.CountWithoutFlag(ctx, flag, skipFlags)
 }
 
-func (a *pluginStoreAdapter) ScanWithoutFlag(ctx context.Context, flag uint8) EngramIterator {
-	iter := a.store.ScanWithoutFlag(ctx, flag)
+func (a *pluginStoreAdapter) ScanWithoutFlag(ctx context.Context, flag, skipFlags uint8) EngramIterator {
+	iter := a.store.ScanWithoutFlag(ctx, flag, skipFlags)
 	if iter == nil {
 		// Prevent a typed-nil concrete pointer from being wrapped in a non-nil
 		// interface value, which would cause a nil-dereference panic in the caller.

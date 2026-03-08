@@ -37,7 +37,7 @@ func TestCountWithoutFlag(t *testing.T) {
 		t.Fatalf("SetDigestFlag: %v", err)
 	}
 
-	count, err := store.CountWithoutFlag(ctx, flag)
+	count, err := store.CountWithoutFlag(ctx, flag, 0)
 	if err != nil {
 		t.Fatalf("CountWithoutFlag: %v", err)
 	}

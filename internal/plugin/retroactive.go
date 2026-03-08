@@ -96,6 +96,15 @@ func (rp *RetroactiveProcessor) Mode() string {
 	return "enrich"
 }
 
+// skipFlags returns the digest flags that should be excluded from scanning.
+// Embed processors skip DigestEmbedFailed engrams to avoid infinite retry loops.
+func (rp *RetroactiveProcessor) skipFlags() uint8 {
+	if rp.flagBit == DigestEmbed {
+		return DigestEmbedFailed
+	}
+	return 0
+}
+
 func (rp *RetroactiveProcessor) run(ctx context.Context) {
 	defer rp.wg.Done()
 
@@ -172,7 +181,8 @@ func (rp *RetroactiveProcessor) backoff(ctx context.Context, consecutiveErrors i
 // inference call per micro-batch, then scatters vectors back individually.
 // For EnrichPlugin: processes one engram at a time (LLM call per engram).
 func (rp *RetroactiveProcessor) processBatch(ctx context.Context) bool {
-	total, err := rp.store.CountWithoutFlag(ctx, rp.flagBit)
+	skipFlags := rp.skipFlags()
+	total, err := rp.store.CountWithoutFlag(ctx, rp.flagBit, skipFlags)
 	if err != nil {
 		slog.Error("retroactive processor: count failed", "plugin", rp.plugin.Name(), "error", err)
 		return false
@@ -188,7 +198,7 @@ func (rp *RetroactiveProcessor) processBatch(ctx context.Context) bool {
 	rp.stats.Total += total
 	rp.statsMu.Unlock()
 
-	iter := rp.store.ScanWithoutFlag(ctx, rp.flagBit)
+	iter := rp.store.ScanWithoutFlag(ctx, rp.flagBit, skipFlags)
 	if iter == nil {
 		slog.Error("retroactive processor: failed to create iterator", "plugin", rp.plugin.Name())
 		return false
@@ -215,10 +225,24 @@ func (rp *RetroactiveProcessor) processBatch(ctx context.Context) bool {
 		}
 		vecs, embedErr := embedPlugin.Embed(ctx, microTexts)
 		if embedErr != nil {
+			ids := make([]string, len(microEngrams))
+			for i, e := range microEngrams {
+				ids[i] = e.ID.String()
+			}
 			slog.Warn("retroactive processor: embed batch failed",
 				"plugin", rp.plugin.Name(),
 				"batch_size", len(microEngrams),
+				"engram_ids", ids,
 				"error", embedErr)
+			// Mark each engram with DigestEmbedFailed so the processor does not
+			// retry them indefinitely. If the underlying provider recovers, an
+			// operator can clear the flag manually or via the admin API.
+			for _, e := range microEngrams {
+				if flagErr := rp.store.SetDigestFlag(ctx, e.ID, DigestEmbedFailed); flagErr != nil {
+					slog.Warn("retroactive processor: failed to set DigestEmbedFailed",
+						"plugin", rp.plugin.Name(), "engram_id", e.ID.String(), "error", flagErr)
+				}
+			}
 			rp.statsMu.Lock()
 			rp.stats.Errors += int64(len(microEngrams))
 			rp.statsMu.Unlock()

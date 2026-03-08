@@ -175,7 +175,11 @@ func (h *AdminHandler) handleAdd(w http.ResponseWriter, ctx context.Context, req
 		flagBit = DigestEnrich
 	}
 
-	total, err := h.store.CountWithoutFlag(ctx, flagBit)
+	skipFlags := uint8(0)
+	if flagBit == DigestEmbed {
+		skipFlags = DigestEmbedFailed
+	}
+	total, err := h.store.CountWithoutFlag(ctx, flagBit, skipFlags)
 	if err != nil {
 		slog.Warn("failed to count unprocessed engrams", "error", err)
 		total = 0
