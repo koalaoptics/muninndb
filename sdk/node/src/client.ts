@@ -82,11 +82,13 @@ export class MuninnClient {
 
   /** Write a single engram. */
   async write(options: WriteOptions): Promise<WriteResponse> {
-    const body = { ...options, vault: options.vault ?? this.defaultVault };
+    const vault = options.vault ?? this.defaultVault;
+    const body = { ...options, vault };
     return this.request<WriteResponse>({
       method: "POST",
       path: "/api/engrams",
       body,
+      query: { vault },
     });
   }
 
@@ -101,16 +103,19 @@ export class MuninnClient {
       body: {
         engrams: engrams.map((e) => ({ ...e, vault: e.vault ?? vault })),
       },
+      query: { vault },
     });
   }
 
   /** Semantic recall / activation query. */
   async activate(options: ActivateOptions): Promise<ActivateResponse> {
-    const body = { ...options, vault: options.vault ?? this.defaultVault };
+    const vault = options.vault ?? this.defaultVault;
+    const body = { ...options, vault };
     return this.request<ActivateResponse>({
       method: "POST",
       path: "/api/activate",
       body,
+      query: { vault },
     });
   }
 
@@ -134,8 +139,9 @@ export class MuninnClient {
 
   /** Create an association between two engrams. */
   async link(options: LinkOptions): Promise<void> {
-    const body = { ...options, vault: options.vault ?? this.defaultVault };
-    await this.request<unknown>({ method: "POST", path: "/api/link", body });
+    const vault = options.vault ?? this.defaultVault;
+    const body = { ...options, vault };
+    await this.request<unknown>({ method: "POST", path: "/api/link", body, query: { vault } });
   }
 
   // -----------------------------------------------------------------------
@@ -161,21 +167,25 @@ export class MuninnClient {
   async consolidate(
     options: ConsolidateOptions,
   ): Promise<ConsolidateResponse> {
-    const body = { ...options, vault: options.vault ?? this.defaultVault };
+    const vault = options.vault ?? this.defaultVault;
+    const body = { ...options, vault };
     return this.request<ConsolidateResponse>({
       method: "POST",
       path: "/api/consolidate",
       body,
+      query: { vault },
     });
   }
 
   /** Record a decision. */
   async decide(options: DecideOptions): Promise<DecideResponse> {
-    const body = { ...options, vault: options.vault ?? this.defaultVault };
+    const vault = options.vault ?? this.defaultVault;
+    const body = { ...options, vault };
     return this.request<DecideResponse>({
       method: "POST",
       path: "/api/decide",
       body,
+      query: { vault },
     });
   }
 
@@ -190,21 +200,25 @@ export class MuninnClient {
 
   /** Traverse the association graph from a starting engram. */
   async traverse(options: TraverseOptions): Promise<TraverseResponse> {
-    const body = { ...options, vault: options.vault ?? this.defaultVault };
+    const vault = options.vault ?? this.defaultVault;
+    const body = { ...options, vault };
     return this.request<TraverseResponse>({
       method: "POST",
       path: "/api/traverse",
       body,
+      query: { vault },
     });
   }
 
   /** Get a scoring breakdown for an engram against a query. */
   async explain(options: ExplainOptions): Promise<ExplainResponse> {
-    const body = { ...options, vault: options.vault ?? this.defaultVault };
+    const vault = options.vault ?? this.defaultVault;
+    const body = { ...options, vault };
     return this.request<ExplainResponse>({
       method: "POST",
       path: "/api/explain",
       body,
+      query: { vault },
     });
   }
 
