@@ -682,6 +682,9 @@ func configureNamedTools(tools []string, mcpURL, token string) []string {
 		case "openclaw":
 			// OpenClaw has no native MCP support — do not touch openclaw.json.
 			// Install only the SKILL.md so OpenClaw recognizes and loads the skill.
+			// Also remove any provider.mcpServers.muninn entry written by v0.3.13-alpha,
+			// which caused a fatal "Unrecognized key: provider" startup error.
+			cleanupOpenClawBadConfig()
 			if err := configureOpenClawSkill(); err != nil {
 				errs = append(errs, fmt.Sprintf("OpenClaw skill: %v", err))
 				fmt.Fprintf(os.Stderr, "  ✗ OpenClaw skill: %v\n", err)

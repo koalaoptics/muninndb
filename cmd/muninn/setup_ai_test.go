@@ -363,6 +363,68 @@ func TestOpenClawConfigPath(t *testing.T) {
 	}
 }
 
+// --- OpenClaw bad config cleanup (migration from v0.3.13-alpha) ---
+
+func TestCleanupOpenClawBadConfig_RemovesMuninnEntry(t *testing.T) {
+	_, cleanup := withTempHome(t)
+	defer cleanup()
+
+	path := openClawConfigPath()
+	os.MkdirAll(filepath.Dir(path), 0755)
+	// Simulate the broken v0.3.13-alpha config.
+	os.WriteFile(path, []byte(`{"provider":{"mcpServers":{"muninn":{"transport":"streamable-http","url":"http://127.0.0.1:8750/mcp"}}},"topKey":"kept"}`), 0644)
+
+	cleanupOpenClawBadConfig()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("config file missing after cleanup: %v", err)
+	}
+	var cfg map[string]any
+	json.Unmarshal(data, &cfg)
+	if _, ok := cfg["provider"]; ok {
+		t.Error("provider key should be removed when mcpServers.muninn was the only entry")
+	}
+	if cfg["topKey"] != "kept" {
+		t.Error("unrelated top-level key must be preserved")
+	}
+}
+
+func TestCleanupOpenClawBadConfig_PreservesOtherServers(t *testing.T) {
+	_, cleanup := withTempHome(t)
+	defer cleanup()
+
+	path := openClawConfigPath()
+	os.MkdirAll(filepath.Dir(path), 0755)
+	os.WriteFile(path, []byte(`{"provider":{"mcpServers":{"muninn":{"transport":"streamable-http"},"other":{"transport":"streamable-http","url":"http://x"}}}}`), 0644)
+
+	cleanupOpenClawBadConfig()
+
+	data, _ := os.ReadFile(path)
+	var cfg map[string]any
+	json.Unmarshal(data, &cfg)
+	provider, ok := cfg["provider"].(map[string]any)
+	if !ok {
+		t.Fatal("provider key removed unexpectedly")
+	}
+	servers := provider["mcpServers"].(map[string]any)
+	if _, ok := servers["muninn"]; ok {
+		t.Error("muninn entry should be removed")
+	}
+	if _, ok := servers["other"]; !ok {
+		t.Error("other server entry must be preserved")
+	}
+}
+
+func TestCleanupOpenClawBadConfig_NoopWhenClean(t *testing.T) {
+	_, cleanup := withTempHome(t)
+	defer cleanup()
+	// No file — should not error or create anything.
+	cleanupOpenClawBadConfig()
+	if _, err := os.ReadFile(openClawConfigPath()); err == nil {
+		t.Error("cleanup should not create openclaw.json when it doesn't exist")
+	}
+}
 
 // --- OpenClaw SKILL.md ---
 

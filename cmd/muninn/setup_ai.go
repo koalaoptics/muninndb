@@ -420,6 +420,47 @@ func configureWindsurf(mcpURL, token string) error {
 	return nil
 }
 
+// cleanupOpenClawBadConfig removes the provider.mcpServers.muninn entry written
+// by v0.3.13-alpha, which caused a fatal "Unrecognized key: provider" startup
+// error in OpenClaw. If the file does not exist or has no provider key, this
+// is a no-op. Errors are silently ignored — cleanup is best-effort.
+func cleanupOpenClawBadConfig() {
+	path := openClawConfigPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // file doesn't exist — nothing to clean up
+	}
+	var cfg map[string]any
+	if json.Unmarshal(data, &cfg) != nil {
+		return // unreadable — leave it alone
+	}
+	provider, ok := cfg["provider"].(map[string]any)
+	if !ok {
+		return // no provider key — already clean
+	}
+	servers, ok := provider["mcpServers"].(map[string]any)
+	if !ok {
+		return
+	}
+	if _, hasMuninn := servers["muninn"]; !hasMuninn {
+		return // our entry isn't there — nothing to do
+	}
+	delete(servers, "muninn")
+	if len(servers) == 0 {
+		delete(provider, "mcpServers")
+	}
+	if len(provider) == 0 {
+		delete(cfg, "provider")
+	}
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(path, append(out, '\n'), 0644); err != nil {
+		return
+	}
+	fmt.Printf("  ✓ OpenClaw: removed stale provider.mcpServers.muninn from %s\n", path)
+}
 
 // openClawSkillContent is the SKILL.md content that teaches OpenClaw how to
 // use MuninnDB for persistent memory across sessions.
