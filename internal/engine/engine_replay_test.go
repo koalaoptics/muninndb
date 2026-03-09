@@ -32,8 +32,8 @@ func (m *mockEnrichPlugin) Enrich(ctx context.Context, eng *storage.Engram) (*pl
 	}, nil
 }
 
-// writeTestEngrams creates n engrams in the given vault and returns the engine.
-func writeTestEngrams(t *testing.T, eng *Engine, ctx context.Context, vault string, n int) {
+// writeTestEngrams creates n engrams in the given vault.
+func writeTestEngrams(t *testing.T, ctx context.Context, eng *Engine, vault string, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
 		_, err := eng.Write(ctx, &mbp.WriteRequest{
@@ -353,7 +353,7 @@ func TestReplayEnrichment_FailedCount(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	writeTestEngrams(t, eng, ctx, "default", 3)
+	writeTestEngrams(t, ctx, eng, "default", 3)
 
 	// Mock that fails on the 2nd call.
 	callCount := 0
@@ -376,11 +376,11 @@ func TestReplayEnrichment_FailedCount(t *testing.T) {
 		t.Fatalf("ReplayEnrichment: %v", err)
 	}
 
-	if result.Failed != 1 {
-		t.Errorf("Failed: got %d, want 1", result.Failed)
-	}
 	if result.Processed != 2 {
 		t.Errorf("Processed: got %d, want 2", result.Processed)
+	}
+	if result.Failed != 1 {
+		t.Errorf("Failed: got %d, want 1", result.Failed)
 	}
 	if result.Remaining != 0 {
 		t.Errorf("Remaining: got %d, want 0", result.Remaining)
@@ -395,7 +395,7 @@ func TestReplayEnrichment_ContextCancellation(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	writeTestEngrams(t, eng, ctx, "default", 5)
+	writeTestEngrams(t, ctx, eng, "default", 5)
 
 	// Create a cancellable context for the replay call.
 	replayCtx, cancel := context.WithCancel(ctx)
@@ -438,7 +438,7 @@ func TestReplayEnrichment_ContextAlreadyExpired(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	writeTestEngrams(t, eng, ctx, "default", 3)
+	writeTestEngrams(t, ctx, eng, "default", 3)
 
 	// Create an already-cancelled context.
 	expiredCtx, cancel := context.WithCancel(ctx)
@@ -455,11 +455,11 @@ func TestReplayEnrichment_ContextAlreadyExpired(t *testing.T) {
 	if result.Processed != 0 {
 		t.Errorf("Processed: got %d, want 0", result.Processed)
 	}
-	if result.Remaining != 3 {
-		t.Errorf("Remaining: got %d, want 3", result.Remaining)
-	}
 	if result.Failed != 0 {
 		t.Errorf("Failed: got %d, want 0", result.Failed)
+	}
+	if result.Remaining != 3 {
+		t.Errorf("Remaining: got %d, want 3", result.Remaining)
 	}
 	assertResultInvariant(t, result, 3)
 }

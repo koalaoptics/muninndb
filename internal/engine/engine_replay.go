@@ -129,8 +129,7 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 			continue
 		}
 
-		// Check if the context has been cancelled (deadline exceeded, manual cancel, etc.).
-		// Count all remaining non-nil engrams and return early.
+		// Honour context cancellation (deadline, manual cancel) — report remaining work.
 		if ctx.Err() != nil {
 			return &ReplayEnrichmentResult{
 				Processed: processed,

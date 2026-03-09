@@ -2236,7 +2236,7 @@ func (e *replayEnrichEngine) ReplayEnrichment(_ context.Context, _ string, _ []s
 		r.DryRun = dryRun
 		return &r, nil
 	}
-	return &engine.ReplayEnrichmentResult{Processed: 5, Skipped: 2, Failed: 0, Remaining: 0, StagesRun: []string{"entities", "relationships", "classification", "summary"}, DryRun: dryRun}, nil
+	return &engine.ReplayEnrichmentResult{Processed: 5, Skipped: 2, StagesRun: []string{"entities", "relationships", "classification", "summary"}, DryRun: dryRun}, nil
 }
 
 func TestHandleReplayEnrichment_HappyPath(t *testing.T) {
@@ -2252,17 +2252,17 @@ func TestHandleReplayEnrichment_HappyPath(t *testing.T) {
 	if _, ok := inner["skipped"]; !ok {
 		t.Error("response missing 'skipped' field")
 	}
-	if _, ok := inner["stages_run"]; !ok {
-		t.Error("response missing 'stages_run' field")
-	}
-	if _, ok := inner["dry_run"]; !ok {
-		t.Error("response missing 'dry_run' field")
-	}
 	if _, ok := inner["failed"]; !ok {
 		t.Error("response missing 'failed' field")
 	}
 	if _, ok := inner["remaining"]; !ok {
 		t.Error("response missing 'remaining' field")
+	}
+	if _, ok := inner["stages_run"]; !ok {
+		t.Error("response missing 'stages_run' field")
+	}
+	if _, ok := inner["dry_run"]; !ok {
+		t.Error("response missing 'dry_run' field")
 	}
 	dryRun, _ := inner["dry_run"].(bool)
 	if dryRun {
