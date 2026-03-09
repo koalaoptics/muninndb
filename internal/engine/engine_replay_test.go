@@ -397,11 +397,10 @@ func TestReplayEnrichment_ContextCancellation(t *testing.T) {
 	ctx := context.Background()
 	writeTestEngrams(t, ctx, eng, "default", 5)
 
-	// Create a cancellable context for the replay call.
 	replayCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Mock that cancels the context after 2 successful calls.
+	// Cancel the context after 2 successful enrichments.
 	callCount := 0
 	mock := &mockEnrichPlugin{
 		enrichFn: func(_ context.Context, _ *storage.Engram) (*plugin.EnrichmentResult, error) {
@@ -440,9 +439,8 @@ func TestReplayEnrichment_ContextAlreadyExpired(t *testing.T) {
 	ctx := context.Background()
 	writeTestEngrams(t, ctx, eng, "default", 3)
 
-	// Create an already-cancelled context.
 	expiredCtx, cancel := context.WithCancel(ctx)
-	cancel()
+	cancel() // Cancel immediately so the context is already expired.
 
 	mock := &mockEnrichPlugin{}
 	eng.SetEnrichPlugin(mock)

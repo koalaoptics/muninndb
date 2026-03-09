@@ -2323,10 +2323,10 @@ func TestHandleReplayEnrichment_FailedAndRemainingInResponse(t *testing.T) {
 	inner := extractInnerJSON(t, resp)
 
 	if failed, _ := inner["failed"].(float64); failed != 2 {
-		t.Errorf("failed: got %v, want 2", inner["failed"])
+		t.Errorf("failed: got %v, want 2", failed)
 	}
 	if remaining, _ := inner["remaining"].(float64); remaining != 4 {
-		t.Errorf("remaining: got %v, want 4", inner["remaining"])
+		t.Errorf("remaining: got %v, want 4", remaining)
 	}
 }
 

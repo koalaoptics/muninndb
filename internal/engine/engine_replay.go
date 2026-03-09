@@ -255,8 +255,8 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 // countNonNilEngrams returns the number of non-nil entries in a slice of engram pointers.
 func countNonNilEngrams(engrams []*storage.Engram) int {
 	n := 0
-	for _, e := range engrams {
-		if e != nil {
+	for _, eng := range engrams {
+		if eng != nil {
 			n++
 		}
 	}
