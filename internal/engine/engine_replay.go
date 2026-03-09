@@ -13,6 +13,8 @@ import (
 type ReplayEnrichmentResult struct {
 	Processed int
 	Skipped   int
+	Failed    int
+	Remaining int
 	StagesRun []string
 	DryRun    bool
 }
@@ -78,6 +80,8 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 		return &ReplayEnrichmentResult{
 			Processed: 0,
 			Skipped:   0,
+			Failed:    0,
+			Remaining: 0,
 			StagesRun: validStages,
 			DryRun:    dryRun,
 		}, nil
@@ -108,6 +112,8 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 		return &ReplayEnrichmentResult{
 			Processed: needed,
 			Skipped:   skipped,
+			Failed:    0,
+			Remaining: 0,
 			StagesRun: validStages,
 			DryRun:    true,
 		}, nil
@@ -120,10 +126,26 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 
 	processed := 0
 	skipped := 0
+	failed := 0
 
-	for _, eng := range engrams {
+	for i, eng := range engrams {
 		if eng == nil {
 			continue
+		}
+
+		// Check if the context has been cancelled (deadline exceeded, manual cancel, etc.).
+		// Count all remaining non-nil engrams as Remaining and return early.
+		if ctx.Err() != nil {
+			remaining := 0
+			for _, re := range engrams[i:] {
+				if re != nil {
+					remaining++
+				}
+			}
+			return &ReplayEnrichmentResult{
+				Processed: processed, Skipped: skipped, Failed: failed,
+				Remaining: remaining, StagesRun: validStages, DryRun: false,
+			}, nil
 		}
 
 		// Check which stages are already done.
@@ -142,6 +164,7 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 		if enrichErr != nil {
 			slog.Warn("replay enrichment: enrich failed, skipping",
 				"id", eng.ID.String(), "err", enrichErr)
+			failed++
 			continue
 		}
 
@@ -149,6 +172,7 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 		if updateErr := e.store.UpdateDigest(ctx, eng.ID, result.Summary, result.KeyPoints, result.MemoryType, result.TypeLabel); updateErr != nil {
 			slog.Warn("replay enrichment: UpdateDigest failed",
 				"id", eng.ID.String(), "err", updateErr)
+			failed++
 			continue
 		}
 
@@ -231,6 +255,8 @@ func (e *Engine) ReplayEnrichment(ctx context.Context, vault string, stages []st
 	return &ReplayEnrichmentResult{
 		Processed: processed,
 		Skipped:   skipped,
+		Failed:    failed,
+		Remaining: 0,
 		StagesRun: validStages,
 		DryRun:    false,
 	}, nil
