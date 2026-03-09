@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -12,8 +13,9 @@ import (
 )
 
 // CountWithoutFlag returns the number of engrams across all vaults that are
-// missing the given digest flag bit.
-func (ps *PebbleStore) CountWithoutFlag(ctx context.Context, flag uint8) (int64, error) {
+// missing the given digest flag bit. Engrams that have any skipFlags bit set
+// are excluded from the count (e.g. permanently-failed engrams).
+func (ps *PebbleStore) CountWithoutFlag(ctx context.Context, flag, skipFlags uint8) (int64, error) {
 	lowerBound := []byte{0x01}
 	upperBound := []byte{0x02}
 
@@ -36,7 +38,7 @@ func (ps *PebbleStore) CountWithoutFlag(ctx context.Context, flag uint8) (int64,
 		copy(id[:], k[9:25])
 
 		raw, err := ps.getDigestFlagsRaw(id)
-		if err != nil || (raw&flag == 0) {
+		if (err != nil || raw&flag == 0) && (skipFlags == 0 || raw&skipFlags == 0) {
 			count++
 		}
 	}
@@ -70,8 +72,9 @@ func (ps *PebbleStore) CountWithFlag(ctx context.Context, flag uint8) (int64, er
 }
 
 // ScanWithoutFlag returns a forward-only iterator over all engrams that are
-// missing the given digest flag bit.
-func (ps *PebbleStore) ScanWithoutFlag(ctx context.Context, flag uint8) *PluginEngramIterator {
+// missing the given digest flag bit. Engrams that have any skipFlags bit set
+// are skipped during iteration.
+func (ps *PebbleStore) ScanWithoutFlag(ctx context.Context, flag, skipFlags uint8) *PluginEngramIterator {
 	lowerBound := []byte{0x01}
 	upperBound := []byte{0x02}
 
@@ -87,12 +90,13 @@ func (ps *PebbleStore) ScanWithoutFlag(ctx context.Context, flag uint8) *PluginE
 	}
 
 	return &PluginEngramIterator{
-		ps:      ps,
-		iter:    iter,
-		flag:    flag,
-		started: false,
-		current: nil,
-		wsCache: make(map[ULID][8]byte),
+		ps:        ps,
+		iter:      iter,
+		flag:      flag,
+		skipFlags: skipFlags,
+		started:   false,
+		current:   nil,
+		wsCache:   make(map[ULID][8]byte),
 	}
 }
 
@@ -100,6 +104,9 @@ func (ps *PebbleStore) ScanWithoutFlag(ctx context.Context, flag uint8) *PluginE
 func (ps *PebbleStore) SetDigestFlag(ctx context.Context, id ULID, flag uint8) error {
 	raw, err := ps.getDigestFlagsRaw([16]byte(id))
 	if err != nil {
+		if !errors.Is(err, pebble.ErrNotFound) {
+			return fmt.Errorf("SetDigestFlag: read current flags: %w", err)
+		}
 		raw = 0
 	}
 	raw |= flag
@@ -216,12 +223,13 @@ func (ps *PebbleStore) FindVaultPrefix(id ULID) ([8]byte, bool) {
 // PluginEngramIterator is a forward-only iterator over engrams missing a digest flag.
 // It implements plugin.EngramIterator.
 type PluginEngramIterator struct {
-	ps      *PebbleStore
-	iter    *pebble.Iterator
-	iterErr error // set when NewIter failed; Next() immediately returns false
-	flag    uint8
-	started bool
-	current *Engram
+	ps        *PebbleStore
+	iter      *pebble.Iterator
+	iterErr   error // set when NewIter failed; Next() immediately returns false
+	flag      uint8
+	skipFlags uint8 // skip engrams that have any of these bits set (e.g. DigestEmbedFailed)
+	started   bool
+	current   *Engram
 	// wsCache maps ULID -> vault prefix so callers can retrieve it.
 	wsCache   map[ULID][8]byte
 	currentWS [8]byte
@@ -262,6 +270,10 @@ func (it *PluginEngramIterator) Next() bool {
 			// Already has this flag, skip
 			continue
 		}
+		// Skip engrams that have a permanent failure flag set (e.g. DigestEmbedFailed).
+		if it.skipFlags != 0 && err == nil && raw&it.skipFlags != 0 {
+			continue
+		}
 
 		// Decode engram
 		val := make([]byte, len(it.iter.Value()))
@@ -272,6 +284,12 @@ func (it *PluginEngramIterator) Next() bool {
 		}
 
 		eng := fromERFEngram(erfEng)
+
+		// Skip soft-deleted and archived engrams — they are not candidates for processing.
+		if eng.State == StateSoftDeleted || eng.State == StateArchived {
+			continue
+		}
+
 		it.current = eng
 		it.currentWS = ws
 		it.wsCache[ULID(id)] = ws

@@ -156,3 +156,24 @@ func TestRingHandler_EnabledDelegatesToBase(t *testing.T) {
 		t.Error("ERROR should be enabled when base is Warn+")
 	}
 }
+
+func TestRingBuffer_Clear(t *testing.T) {
+	rb := logging.NewRingBuffer(5, nil)
+	rb.Add(logging.LogEntry{Msg: "a"})
+	rb.Add(logging.LogEntry{Msg: "b"})
+	rb.Add(logging.LogEntry{Msg: "c"})
+
+	rb.Clear()
+
+	snap := rb.Snapshot()
+	if len(snap) != 0 {
+		t.Fatalf("expected 0 entries after Clear, got %d", len(snap))
+	}
+
+	// Verify the buffer is usable after clearing.
+	rb.Add(logging.LogEntry{Msg: "d"})
+	snap = rb.Snapshot()
+	if len(snap) != 1 || snap[0].Msg != "d" {
+		t.Errorf("expected [d] after Clear + Add, got %+v", snap)
+	}
+}

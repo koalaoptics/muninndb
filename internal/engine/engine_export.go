@@ -1,12 +1,10 @@
 package engine
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 
-	"github.com/cockroachdb/pebble"
 	"github.com/scrypster/muninndb/internal/engine/vaultjob"
 	"github.com/scrypster/muninndb/internal/metrics"
 	"github.com/scrypster/muninndb/internal/storage"
@@ -90,10 +88,10 @@ func (e *Engine) StartImport(ctx context.Context, vaultName, embedderModel strin
 	}
 	if !e.spawnJob(func() { e.runImport(job, wsTarget, vaultName, r, opts) }) {
 		e.jobManager.Fail(job, fmt.Errorf("engine is shutting down"))
-		if cleanupErr := e.store.DeleteVaultNameOnly(context.Background(), vaultName, wsTarget); cleanupErr != nil {
-			slog.Warn("start import: failed to clean up reserved vault name during shutdown",
-				"vault", vaultName, "err", cleanupErr)
-		}
+		// Do NOT call DeleteVaultNameOnly here: the engine is shutting down and
+		// Pebble may already be closed, which would panic. The orphaned vault name
+		// entry is harmless — an incomplete import target with no engrams will
+		// simply appear as an empty vault until cleaned up by the operator.
 		return job, nil // job is already failed; return it so the caller can report the job_id
 	}
 	return job, nil
@@ -107,7 +105,7 @@ func (e *Engine) runImport(job *vaultjob.Job, wsTarget [8]byte, vaultName string
 		if rec := recover(); rec != nil {
 			// Swallow closed-DB panics — can occur if the 30s Stop() timeout
 			// expires and Pebble is closed before this goroutine exits.
-			if err, ok := rec.(error); ok && errors.Is(err, pebble.ErrClosed) {
+			if storage.IsClosedPanic(rec) {
 				e.jobManager.Fail(job, fmt.Errorf("engine closed during job"))
 				return
 			}

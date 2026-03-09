@@ -22,7 +22,8 @@ type PluginConfig struct {
 type EnrichmentResult struct {
 	Summary        string              // abstractive summary (replaces extractive)
 	KeyPoints      []string            // semantic key points (replaces IDF-based)
-	MemoryType     string              // nuanced classification (e.g., "architectural_decision")
+	MemoryType     string              // canonical memory type (e.g., "decision")
+	TypeLabel      string              // nuanced classification label (e.g., "architectural_decision")
 	Classification string              // topic category (e.g., "infrastructure/databases")
 	Entities       []ExtractedEntity   // people, projects, tools, organizations
 	Relationships  []ExtractedRelation // typed relationships between entities
@@ -55,6 +56,11 @@ const (
 	DigestRelationships uint8 = 0x10 // relationship extraction complete
 	DigestClassified    uint8 = 0x20 // classification complete
 	DigestSummarized    uint8 = 0x40 // summarization complete
+
+	// DigestEmbedFailed is set when an embed batch permanently fails for an engram.
+	// Engrams with this flag are skipped by the embed retroactive processor so
+	// they are not retried indefinitely.
+	DigestEmbedFailed uint8 = 0x80
 )
 
 // PluginStatus represents the runtime state of a registered plugin.
@@ -69,7 +75,7 @@ type PluginStatus struct {
 // RetroactiveStats is the progress of a retroactive processor.
 type RetroactiveStats struct {
 	PluginName string    `json:"plugin_name"`
-	Status     string    `json:"status"`     // "running", "complete", "paused", "failed"
+	Status     string    `json:"status"` // "running", "complete", "paused", "failed"
 	Processed  int64     `json:"processed"`
 	Total      int64     `json:"total"`
 	RatePerSec float64   `json:"rate_per_sec"`

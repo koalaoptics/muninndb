@@ -113,10 +113,12 @@ func NewServer(webFS fs.FS, engine rest.EngineAPI, apiHandler http.Handler, auth
 	if s.authStore != nil && len(s.sessionSecret) > 0 {
 		mux.HandleFunc("GET /api/auth/check", s.authStore.AdminAPIMiddleware(s.sessionSecret, authCheckHandler))
 		mux.HandleFunc("GET /logs", s.authStore.AdminAPIMiddleware(s.sessionSecret, s.handleLogs))
+		mux.HandleFunc("DELETE /logs", s.authStore.AdminAPIMiddleware(s.sessionSecret, s.handleClearLogs))
 		mux.HandleFunc("/events", s.authStore.AdminAPIMiddleware(s.sessionSecret, s.handleSSE))
 	} else {
 		mux.HandleFunc("GET /api/auth/check", authCheckHandler)
 		mux.HandleFunc("GET /logs", s.handleLogs)
+		mux.HandleFunc("DELETE /logs", s.handleClearLogs)
 		mux.HandleFunc("/events", s.handleSSE)
 	}
 	mux.Handle("/api/", apiHandler)
@@ -204,6 +206,14 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	json.NewEncoder(w).Encode(out)
+}
+
+// handleClearLogs empties the in-memory ring buffer so the Logs page starts fresh.
+func (s *Server) handleClearLogs(w http.ResponseWriter, r *http.Request) {
+	if s.ring != nil {
+		s.ring.Clear()
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // setCORSIfAllowed sets Access-Control-Allow-Origin + Vary: Origin if the

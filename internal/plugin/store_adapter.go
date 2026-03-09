@@ -20,12 +20,12 @@ func NewStoreAdapter(store *storage.PebbleStore, hnsw *hnswpkg.Registry) PluginS
 	return &pluginStoreAdapter{store: store, hnsw: hnsw}
 }
 
-func (a *pluginStoreAdapter) CountWithoutFlag(ctx context.Context, flag uint8) (int64, error) {
-	return a.store.CountWithoutFlag(ctx, flag)
+func (a *pluginStoreAdapter) CountWithoutFlag(ctx context.Context, flag, skipFlags uint8) (int64, error) {
+	return a.store.CountWithoutFlag(ctx, flag, skipFlags)
 }
 
-func (a *pluginStoreAdapter) ScanWithoutFlag(ctx context.Context, flag uint8) EngramIterator {
-	iter := a.store.ScanWithoutFlag(ctx, flag)
+func (a *pluginStoreAdapter) ScanWithoutFlag(ctx context.Context, flag, skipFlags uint8) EngramIterator {
+	iter := a.store.ScanWithoutFlag(ctx, flag, skipFlags)
 	if iter == nil {
 		// Prevent a typed-nil concrete pointer from being wrapped in a non-nil
 		// interface value, which would cause a nil-dereference panic in the caller.
@@ -51,7 +51,10 @@ func (a *pluginStoreAdapter) UpdateEmbedding(ctx context.Context, id ULID, vec [
 }
 
 func (a *pluginStoreAdapter) UpdateDigest(ctx context.Context, id ULID, result *EnrichmentResult) error {
-	return a.store.UpdateDigest(ctx, storage.ULID(id), result.Summary, result.KeyPoints, result.MemoryType)
+	if result == nil {
+		return fmt.Errorf("UpdateDigest: nil enrichment result")
+	}
+	return a.store.UpdateDigest(ctx, storage.ULID(id), result.Summary, result.KeyPoints, result.MemoryType, result.TypeLabel)
 }
 
 func (a *pluginStoreAdapter) UpsertEntity(ctx context.Context, entity ExtractedEntity) error {

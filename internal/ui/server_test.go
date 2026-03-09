@@ -724,3 +724,57 @@ func TestSessionCookie_NoSecureFlagWithoutTLS(t *testing.T) {
 		t.Errorf("expected Set-Cookie to NOT contain Secure flag, got: %q", setCookie)
 	}
 }
+
+func TestClearLogs_EmptiesRing(t *testing.T) {
+	ring := logging.NewRingBuffer(10, nil)
+	ring.Add(logging.LogEntry{Msg: "entry1"})
+	ring.Add(logging.LogEntry{Msg: "entry2"})
+
+	webFS := makeMockFS()
+	eng := &mockEngine{}
+	srv, err := ui.NewServer(webFS, eng, http.NotFoundHandler(), nil, nil, ring, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	req := httptest.NewRequest("DELETE", "/logs", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+	if len(ring.Snapshot()) != 0 {
+		t.Error("expected ring buffer to be empty after DELETE /logs")
+	}
+}
+
+func TestClearLogs_RequiresAuth(t *testing.T) {
+	srv, _, _ := newAuthServer(t, nil)
+
+	req := httptest.NewRequest("DELETE", "/logs", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 without session cookie, got %d", w.Code)
+	}
+}
+
+func TestClearLogs_AllowedWithValidSession(t *testing.T) {
+	srv, _, secret := newAuthServer(t, nil)
+
+	token, err := auth.NewSessionToken("admin", secret)
+	if err != nil {
+		t.Fatalf("NewSessionToken: %v", err)
+	}
+
+	req := httptest.NewRequest("DELETE", "/logs", nil)
+	req.AddCookie(&http.Cookie{Name: "muninn_session", Value: token})
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 with valid session, got %d", w.Code)
+	}
+}

@@ -6,13 +6,17 @@ import "context"
 // A subset of EngineStore — plugins never see the full store surface.
 type PluginStore interface {
 	// CountWithoutFlag returns the number of engrams missing the given digest flag.
+	// skipFlags causes engrams that have any of those bits set to be excluded
+	// from the count (e.g. pass DigestEmbedFailed to exclude permanently-failed engrams).
 	// Used by RetroactiveProcessor to calculate total work.
-	CountWithoutFlag(ctx context.Context, flag uint8) (int64, error)
+	CountWithoutFlag(ctx context.Context, flag, skipFlags uint8) (int64, error)
 
 	// ScanWithoutFlag returns an iterator over engrams missing the given digest flag.
+	// skipFlags causes engrams that have any of those bits set to be skipped
+	// (e.g. pass DigestEmbedFailed to skip permanently-failed engrams).
 	// Iterates in ULID order (oldest first). Must be resumable: if the server
 	// restarts, calling ScanWithoutFlag again yields only unprocessed engrams.
-	ScanWithoutFlag(ctx context.Context, flag uint8) EngramIterator
+	ScanWithoutFlag(ctx context.Context, flag, skipFlags uint8) EngramIterator
 
 	// SetDigestFlag sets a digest flag bit on an engram's metadata.
 	// Atomic: uses Pebble Merge to set the bit without read-modify-write.
@@ -25,8 +29,8 @@ type PluginStore interface {
 	// Also updates the EmbedDim field in ERF metadata.
 	UpdateEmbedding(ctx context.Context, id ULID, vec []float32) error
 
-	// UpdateDigest updates the digest fields (summary, key_points, memory_type,
-	// classification) on an existing engram. Called by the enrich plugin.
+	// UpdateDigest updates digest fields (summary, key_points, memory_type,
+	// type_label/topic classification) on an existing engram. Called by enrich.
 	UpdateDigest(ctx context.Context, id ULID, result *EnrichmentResult) error
 
 	// UpsertEntity creates or updates a lightweight entity record.

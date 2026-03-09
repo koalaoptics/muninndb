@@ -62,6 +62,14 @@ func (rb *RingBuffer) Add(e LogEntry) {
 	}
 }
 
+// Clear removes all entries from the ring buffer.
+func (rb *RingBuffer) Clear() {
+	rb.mu.Lock()
+	rb.head = 0
+	rb.count = 0
+	rb.mu.Unlock()
+}
+
 // Snapshot returns all current entries in insertion order (oldest first).
 func (rb *RingBuffer) Snapshot() []LogEntry {
 	rb.mu.Lock()

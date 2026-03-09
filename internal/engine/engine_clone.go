@@ -2,11 +2,9 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 
-	"github.com/cockroachdb/pebble"
 	"github.com/scrypster/muninndb/internal/engine/vaultjob"
 	"github.com/scrypster/muninndb/internal/index/fts"
 	"github.com/scrypster/muninndb/internal/storage"
@@ -69,10 +67,11 @@ func (e *Engine) StartClone(ctx context.Context, sourceVault, newName string) (*
 
 	if !e.spawnJob(func() { e.runClone(job, wsSource, wsTarget, newName) }) {
 		e.jobManager.Fail(job, fmt.Errorf("engine is shutting down"))
-		if cleanupErr := e.store.DeleteVaultNameOnly(context.Background(), newName, wsTarget); cleanupErr != nil {
-			slog.Warn("start clone: failed to clean up reserved vault name during shutdown",
-				"vault", newName, "err", cleanupErr)
-		}
+		// Do NOT call DeleteVaultNameOnly here: the engine is shutting down and
+		// Pebble may already be closed, which would panic. The orphaned vault name
+		// entry is harmless — it does not survive a restart because vault names are
+		// re-scanned from storage on Open, and an incomplete clone target with no
+		// engrams will simply appear as an empty vault.
 		return job, nil // job is already failed; return it so the caller can report the job_id
 	}
 	return job, nil
@@ -87,7 +86,7 @@ func (e *Engine) runClone(job *vaultjob.Job, wsSource, wsTarget [8]byte, newName
 		if r := recover(); r != nil {
 			// Swallow closed-DB panics — can occur if the 30s Stop() timeout
 			// expires and Pebble is closed before this goroutine exits.
-			if err, ok := r.(error); ok && errors.Is(err, pebble.ErrClosed) {
+			if storage.IsClosedPanic(r) {
 				e.jobManager.Fail(job, fmt.Errorf("engine closed during job"))
 				return
 			}
@@ -216,7 +215,7 @@ func (e *Engine) runMerge(job *vaultjob.Job, wsSource, wsTarget [8]byte, sourceV
 		if r := recover(); r != nil {
 			// Swallow closed-DB panics — can occur if the 30s Stop() timeout
 			// expires and Pebble is closed before this goroutine exits.
-			if err, ok := r.(error); ok && errors.Is(err, pebble.ErrClosed) {
+			if storage.IsClosedPanic(r) {
 				e.jobManager.Fail(job, fmt.Errorf("engine closed during job"))
 				return
 			}

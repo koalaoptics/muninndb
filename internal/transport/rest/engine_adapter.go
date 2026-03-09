@@ -454,12 +454,17 @@ func (w *RESTEngineWrapper) RetryEnrich(ctx context.Context, vault, engramID str
 	if err != nil {
 		return nil, fmt.Errorf("get engram: %w", err)
 	}
-	_, enrichErr := w.enricher.Enrich(ctx, eng)
+	result, enrichErr := w.enricher.Enrich(ctx, eng)
 	if enrichErr != nil {
 		return nil, fmt.Errorf("enrich: %w", enrichErr)
 	}
-	if _, err := w.engine.Store().WriteEngram(ctx, ws, eng); err != nil {
-		return nil, fmt.Errorf("persist enriched engram: %w", err)
+	if result == nil {
+		return nil, fmt.Errorf("enrich returned nil result")
+	}
+
+	pStore := plugin.NewStoreAdapter(w.engine.Store(), w.hnswReg)
+	if err := plugin.PersistEnrichmentResult(ctx, pStore, plugin.ULID(ulid), result); err != nil {
+		return nil, err
 	}
 	return &RetryEnrichResponse{
 		EngramID:      engramID,

@@ -64,8 +64,11 @@ func (c *Client) Write(ctx context.Context, vault, concept, content string, tags
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", vault)
+
 	var resp WriteResponse
-	if err := c.request(ctx, "POST", "/api/engrams", body, &resp); err != nil {
+	if err := c.request(ctx, "POST", "/api/engrams?"+q.Encode(), body, &resp); err != nil {
 		return "", err
 	}
 
@@ -86,8 +89,11 @@ func (c *Client) WriteWithOptions(ctx context.Context, req WriteRequest) (*Write
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", req.Vault)
+
 	var resp WriteResponse
-	if err := c.request(ctx, "POST", "/api/engrams", body, &resp); err != nil {
+	if err := c.request(ctx, "POST", "/api/engrams?"+q.Encode(), body, &resp); err != nil {
 		return nil, err
 	}
 
@@ -118,8 +124,11 @@ func (c *Client) WriteBatch(ctx context.Context, vault string, engrams []WriteRe
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", vault)
+
 	var resp BatchWriteResponse
-	if err := c.request(ctx, "POST", "/api/engrams/batch", body, &resp); err != nil {
+	if err := c.request(ctx, "POST", "/api/engrams/batch?"+q.Encode(), body, &resp); err != nil {
 		return nil, err
 	}
 
@@ -155,8 +164,11 @@ func (c *Client) Activate(ctx context.Context, vault string, context []string, m
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", vault)
+
 	resp := &ActivateResponse{}
-	if err := c.request(ctx, "POST", "/api/activate", body, resp); err != nil {
+	if err := c.request(ctx, "POST", "/api/activate?"+q.Encode(), body, resp); err != nil {
 		return nil, err
 	}
 
@@ -178,7 +190,10 @@ func (c *Client) Link(ctx context.Context, vault, sourceID, targetID string, rel
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	return c.request(ctx, "POST", "/api/link", body, nil)
+	q := url.Values{}
+	q.Set("vault", vault)
+
+	return c.request(ctx, "POST", "/api/link?"+q.Encode(), body, nil)
 }
 
 // Forget forgets an engram.
@@ -269,8 +284,11 @@ func (c *Client) ActivateWithOptions(ctx context.Context, req ActivateRequest) (
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", req.Vault)
+
 	resp := &ActivateResponse{}
-	if err := c.request(ctx, "POST", "/api/activate", body, resp); err != nil {
+	if err := c.request(ctx, "POST", "/api/activate?"+q.Encode(), body, resp); err != nil {
 		return nil, err
 	}
 
@@ -290,8 +308,11 @@ func (c *Client) Evolve(ctx context.Context, vault, engramID, newContent, reason
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", vault)
+
 	resp := &EvolveResponse{}
-	if err := c.request(ctx, "POST", fmt.Sprintf("/api/engrams/%s/evolve", engramID), body, resp); err != nil {
+	if err := c.request(ctx, "POST", fmt.Sprintf("/api/engrams/%s/evolve?%s", engramID, q.Encode()), body, resp); err != nil {
 		return nil, err
 	}
 
@@ -311,8 +332,11 @@ func (c *Client) Consolidate(ctx context.Context, vault string, ids []string, me
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", vault)
+
 	resp := &ConsolidateResponse{}
-	if err := c.request(ctx, "POST", "/api/consolidate", body, resp); err != nil {
+	if err := c.request(ctx, "POST", "/api/consolidate?"+q.Encode(), body, resp); err != nil {
 		return nil, err
 	}
 
@@ -334,8 +358,11 @@ func (c *Client) Decide(ctx context.Context, vault, decision, rationale string, 
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", vault)
+
 	resp := &DecideResponse{}
-	if err := c.request(ctx, "POST", "/api/decide", body, resp); err != nil {
+	if err := c.request(ctx, "POST", "/api/decide?"+q.Encode(), body, resp); err != nil {
 		return nil, err
 	}
 
@@ -371,8 +398,11 @@ func (c *Client) Traverse(ctx context.Context, vault, startID string, maxHops, m
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", vault)
+
 	resp := &TraverseResponse{}
-	if err := c.request(ctx, "POST", "/api/traverse", body, resp); err != nil {
+	if err := c.request(ctx, "POST", "/api/traverse?"+q.Encode(), body, resp); err != nil {
 		return nil, err
 	}
 
@@ -392,8 +422,11 @@ func (c *Client) Explain(ctx context.Context, vault, engramID string, query []st
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", vault)
+
 	resp := &ExplainResponse{}
-	if err := c.request(ctx, "POST", "/api/explain", body, resp); err != nil {
+	if err := c.request(ctx, "POST", "/api/explain?"+q.Encode(), body, resp); err != nil {
 		return nil, err
 	}
 
@@ -413,8 +446,11 @@ func (c *Client) SetState(ctx context.Context, vault, engramID, state, reason st
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	q := url.Values{}
+	q.Set("vault", vault)
+
 	resp := &SetStateResponse{}
-	if err := c.request(ctx, "PUT", fmt.Sprintf("/api/engrams/%s/state", engramID), body, resp); err != nil {
+	if err := c.request(ctx, "PUT", fmt.Sprintf("/api/engrams/%s/state?%s", engramID, q.Encode()), body, resp); err != nil {
 		return nil, err
 	}
 
