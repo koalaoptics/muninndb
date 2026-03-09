@@ -465,8 +465,8 @@ func TestConfigureOpenClawSkill_WritesFile(t *testing.T) {
 	if !strings.Contains(string(data), "MuninnDB") {
 		t.Error("SKILL.md should mention MuninnDB")
 	}
-	if !strings.Contains(string(data), "muninn_remember") {
-		t.Error("SKILL.md should mention muninn_remember tool")
+	if !strings.Contains(string(data), "/api/engrams") {
+		t.Error("SKILL.md should mention the REST API engrams endpoint")
 	}
 	if !strings.Contains(out, "SKILL.md") {
 		t.Errorf("output should mention SKILL.md: %s", out)
@@ -883,8 +883,8 @@ func TestOpenClawSkillHasFrontmatter(t *testing.T) {
 	if !strings.Contains(openClawSkillContent, "bins:") {
 		t.Error("SKILL.md frontmatter must include requires.bins")
 	}
-	if !strings.Contains(openClawSkillContent, "- muninn") {
-		t.Error("SKILL.md frontmatter requires.bins must list muninn binary")
+	if !strings.Contains(openClawSkillContent, "- curl") {
+		t.Error("SKILL.md frontmatter requires.bins must list curl (REST API uses curl)")
 	}
 }
 
