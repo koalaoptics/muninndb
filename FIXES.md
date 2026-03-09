@@ -143,17 +143,63 @@ docker run -d --name muninndb-fixed \
 ```
 
 ### Option B — Hot patch via --dev flag (no rebuild)
+
+> **Note:** Mount at `/web`, not `/usr/local/bin/web`.
+> The binary sets `webDir = filepath.Dir(os.Args[0]) + "/web"`. Inside the
+> Docker ENTRYPOINT, `os.Args[0]` is `"muninndb-server"` (no path), so
+> `filepath.Dir()` returns `"."` and `webDir` resolves to `"web"` relative
+> to the container's working directory (`/`). The correct host mount is `/web`.
+> Also requires running `npm run build` in the web directory to compile
+> Tailwind CSS — the HTML references `/static/dist/app.css` (compiled output),
+> not the raw source files.
+
 ```bash
-# Copy web directory to host
+# 1. Prepare web files on host
 mkdir -p /opt/muninndb/web
-# Copy the fixed app.js into the web/static/js/ path
-# Restart container with --dev flag and volume mount
-docker stop muninndb
+# Copy the repo web/ directory to /opt/muninndb/web/ and compile CSS:
+cd /opt/muninndb/web && npm ci --ignore-scripts && npm run build
+
+# 2. Restart container with --dev and correct mount point
+docker stop muninndb && docker rm muninndb
 docker run -d --name muninndb \
   -p 8474:8474 -p 8475:8475 -p 8476:8476 -p 8750:8750 \
   -v muninndb_data:/data \
-  -v /opt/muninndb/web:/usr/local/bin/web \
+  -v /opt/muninndb/web:/web \
   --env-file .env \
   ghcr.io/scrypster/muninndb:latest \
   --daemon --data /data --dev
+```
+
+### Option C — Build binary from source + systemd (recommended for self-hosters)
+
+The `ghcr.io/scrypster/muninndb:latest` Docker image may lag behind the source.
+As of March 2026, the image is missing two API endpoints the UI requires:
+- `POST /api/engrams/links/batch` — used by Memory Graph
+- `GET /api/admin/entity-graph` — used by Entity Graph
+
+Building from source gets the correct binary with all endpoints AND the 3
+fixes embedded. No Docker required.
+
+```bash
+# 1. Install Go 1.24+
+curl -fsSL https://go.dev/dl/go1.24.2.linux-amd64.tar.gz -o /tmp/go.tar.gz
+rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tar.gz
+export PATH=$PATH:/usr/local/go/bin
+
+# 2. Clone fork and fetch assets
+cd /opt
+git clone https://github.com/To3Knee/muninndb.git muninndb-src
+cd muninndb-src
+make fetch-model _ort-linux-amd64
+
+# 3. Build
+make web
+go build -ldflags="-s -w" -o muninndb-server ./cmd/muninn/...
+
+# 4. Install systemd service (see muninndb.service in this repo)
+cp muninndb.service /etc/systemd/system/muninndb.service
+# Edit the file to set your API keys and data path, then:
+systemctl daemon-reload
+systemctl enable muninndb
+systemctl start muninndb
 ```
