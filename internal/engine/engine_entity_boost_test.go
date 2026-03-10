@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -179,4 +180,59 @@ func TestEntityBoost_ApplyEntityBoostDirect(t *testing.T) {
 	// Engram C must NOT be in results (different entity, no entity link written).
 	_, cFound := idSet[idC]
 	require.False(t, cFound, "engram C (different entity) should not be in boosted results")
+}
+
+// TestEntityBoost_MaxResultsRespectedAfterBoost verifies that max_results is
+// enforced even when the entity boost phase appends additional engrams beyond
+// the limit. Regression test for issue #171.
+func TestEntityBoost_MaxResultsRespectedAfterBoost(t *testing.T) {
+	t.Parallel()
+	eng, cleanup := testEnv(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	const vault = "max-results-test"
+
+	// Write one strong-match engram tagged with entity "PostgreSQL".
+	_, err := eng.Write(ctx, &mbp.WriteRequest{
+		Vault:   vault,
+		Concept: "primary database",
+		Content: "PostgreSQL primary relational database for transactional workloads",
+		Entities: []mbp.InlineEntity{
+			{Name: "PostgreSQL", Type: "database"},
+		},
+	})
+	require.NoError(t, err)
+
+	// Write many additional entity-linked engrams; the entity boost phase may
+	// append these to results after the BFS limit has been applied.
+	for i := range 8 {
+		_, err := eng.Write(ctx, &mbp.WriteRequest{
+			Vault:   vault,
+			Concept: "related config",
+			Content: fmt.Sprintf("PostgreSQL related engram %d configuration details", i),
+			Entities: []mbp.InlineEntity{
+				{Name: "PostgreSQL", Type: "database"},
+			},
+		})
+		require.NoError(t, err)
+	}
+
+	const maxResults = 3
+	resp, err := eng.Activate(ctx, &mbp.ActivateRequest{
+		Vault:      vault,
+		Context:    []string{"PostgreSQL database"},
+		MaxResults: maxResults,
+	})
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(resp.Activations), maxResults,
+		"expected at most %d activations after entity boost, got %d", maxResults, len(resp.Activations))
+
+	// Verify descending score order — entity boost re-sorts, truncation must preserve it.
+	for i := 1; i < len(resp.Activations); i++ {
+		if resp.Activations[i].Score > resp.Activations[i-1].Score {
+			t.Errorf("activations not sorted descending at index %d: %.3f > %.3f",
+				i, resp.Activations[i].Score, resp.Activations[i-1].Score)
+		}
+	}
 }

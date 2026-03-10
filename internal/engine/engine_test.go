@@ -2067,3 +2067,34 @@ func TestStat_DefaultVaultMinimum(t *testing.T) {
 		t.Errorf("expected VaultCount >= 1 (minimum floor), got %d", resp.VaultCount)
 	}
 }
+
+// TestEngineTraverse_EdgeRelTypePopulated verifies that TraversalEdge.RelType
+// is populated from the storage.Association when traversing a typed edge.
+// Regression test for issue #173 (rel_type always empty in muninn_traverse).
+func TestEngineTraverse_EdgeRelTypePopulated(t *testing.T) {
+	eng, cleanup := testEnv(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	r1, _ := eng.Write(ctx, &mbp.WriteRequest{Vault: "test", Concept: "src", Content: "source engram"})
+	r2, _ := eng.Write(ctx, &mbp.WriteRequest{Vault: "test", Concept: "dst", Content: "destination engram"})
+
+	_, _ = eng.Link(ctx, &mbp.LinkRequest{
+		SourceID: r1.ID,
+		TargetID: r2.ID,
+		RelType:  uint16(storage.RelSupports),
+		Weight:   0.9,
+		Vault:    "test",
+	})
+
+	_, edges, err := eng.Traverse(ctx, "test", r1.ID, 1, 50, false)
+	if err != nil {
+		t.Fatalf("Traverse: %v", err)
+	}
+	if len(edges) == 0 {
+		t.Fatal("expected at least one edge")
+	}
+	if edges[0].RelType != storage.RelSupports {
+		t.Errorf("edge RelType = %v (%d), want storage.RelSupports (%d)", edges[0].RelType, edges[0].RelType, storage.RelSupports)
+	}
+}
