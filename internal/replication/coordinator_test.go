@@ -1247,33 +1247,90 @@ func TestClusterCoordinator_HandleHandoff_PromotesTarget(t *testing.T) {
 	}
 }
 
-// TestBug176_PersistedRoleClearedAfterPromotion is a regression test for GitHub issue #176.
-// When a node was promoted to Cortex via HandleHandoff, PersistRole("cortex") was written to
-// Pebble as a crash-recovery breadcrumb but was never cleared after handlePromotion completed.
-// On the next clean restart, runAsCortex incorrectly entered the crash-recovery path, bypassing
-// the YAML-configured role. This test proves the bug exists (fails before fix) and guards against
-// regressions.
-func TestBug176_PersistedRoleClearedAfterPromotion(t *testing.T) {
+// TestBug176_CrashRecoveryPathClearsBreadcrumb is a regression test for GitHub issue #176
+// (crash-recovery path). When a node recovered from a crash mid-handoff, it promoted itself
+// correctly but never cleared the PersistRole("cortex") breadcrumb. Every subsequent clean
+// restart incorrectly re-entered the crash-recovery path rather than going through a normal
+// election.
+func TestBug176_CrashRecoveryPathClearsBreadcrumb(t *testing.T) {
 	coord, _ := newTestCoordinator(t, "primary")
 
-	// Simulate the state left by a previous successful HandleHandoff:
-	// PersistRole("cortex") is written before handlePromotion, epoch > 0.
+	// Pre-set state: simulates a previous crash during HandleHandoff — PersistRole("cortex")
+	// was written and epoch was advanced, but in-memory promotion never completed.
 	if err := coord.epochStore.PersistRole("cortex"); err != nil {
 		t.Fatalf("PersistRole: %v", err)
 	}
 	coord.epochStore.ForceSet(1)
 
-	// Simulate successful promotion (as HandleHandoff would do).
-	simulatePromotion(coord, 1)
+	// Run the crash-recovery path via runAsCortex; cancel context immediately after
+	// the recovery finishes (it blocks on <-ctx.Done() after promoting).
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- coord.runAsCortex(ctx)
+	}()
 
-	// After a successful promotion, the crash-recovery breadcrumb must be cleared.
-	// Without the fix, LoadRole() still returns "cortex" and the next clean restart
-	// incorrectly enters the crash-recovery path (#176 bug).
+	// Allow time for crash-recovery to promote and clear the role, then unblock.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runAsCortex did not return after context cancel")
+	}
+
+	// The breadcrumb must be cleared so the next clean restart uses a normal election.
 	role, err := coord.epochStore.LoadRole()
 	if err != nil {
 		t.Fatalf("LoadRole: %v", err)
 	}
 	if role != "" {
-		t.Errorf("LoadRole() = %q after successful promotion, want \"\" (regression: issue #176)", role)
+		t.Errorf("LoadRole() = %q after crash-recovery, want \"\" (regression: issue #176)", role)
+	}
+	// The coordinator must be in Primary role after crash-recovery.
+	if coord.Role() != RolePrimary {
+		t.Errorf("Role() = %v after crash-recovery, want RolePrimary", coord.Role())
+	}
+}
+
+// TestBug176_HandleHandoffClearsBreadcrumb is a regression test for GitHub issue #176
+// (HandleHandoff path). After a successful handoff promotion, the PersistRole("cortex")
+// breadcrumb must be cleared once the ACK is delivered to the old Cortex.
+func TestBug176_HandleHandoffClearsBreadcrumb(t *testing.T) {
+	coord, _ := newTestCoordinator(t, "replica")
+	coord.epochStore.ForceSet(5)
+
+	// Wire a pipe so HandleHandoff can send the HANDOFF_ACK.
+	fromID := "old-cortex"
+	serverSide, clientSide := net.Pipe()
+	t.Cleanup(func() { serverSide.Close(); clientSide.Close() })
+	fromPeer := &PeerConn{nodeID: fromID, conn: serverSide}
+	coord.mgr.mu.Lock()
+	coord.mgr.peers[fromID] = fromPeer
+	coord.mgr.mu.Unlock()
+
+	// Drain frames from the client side (CortexClaim broadcast + HANDOFF_ACK).
+	go func() {
+		for {
+			if _, err := mbp.ReadFrame(clientSide); err != nil {
+				return
+			}
+		}
+	}()
+
+	msg := mbp.HandoffMessage{TargetID: coord.cfg.NodeID, Epoch: 5, CortexSeq: 100}
+	payload, _ := msgpack.Marshal(msg)
+
+	if err := coord.HandleHandoff(fromID, payload); err != nil {
+		t.Fatalf("HandleHandoff: %v", err)
+	}
+
+	// After a successful HandleHandoff (ACK sent), the breadcrumb must be cleared.
+	role, err := coord.epochStore.LoadRole()
+	if err != nil {
+		t.Fatalf("LoadRole: %v", err)
+	}
+	if role != "" {
+		t.Errorf("LoadRole() = %q after HandleHandoff, want \"\" (regression: issue #176)", role)
 	}
 }

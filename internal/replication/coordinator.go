@@ -351,6 +351,12 @@ func (c *ClusterCoordinator) runAsCortex(ctx context.Context) error {
 		c.election.currentLeader = c.cfg.NodeID
 		c.election.mu.Unlock()
 		c.handlePromotion(currentEpoch)
+		// Clear the crash-recovery breadcrumb now that in-memory promotion is
+		// complete. Without this, every subsequent clean restart re-enters this
+		// path instead of going through a normal election. (#176)
+		if err := c.epochStore.PersistRole(""); err != nil {
+			slog.Warn("cluster: failed to clear persisted role after crash-recovery", "err", err)
+		}
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -755,14 +761,6 @@ func (c *ClusterCoordinator) handlePromotion(epoch uint64) {
 	c.election.mu.Unlock()
 
 	slog.Info("cluster: promoted to Cortex", "epoch", epoch, "node", c.cfg.NodeID)
-
-	// Clear the crash-recovery breadcrumb now that in-memory promotion is complete.
-	// PersistRole("cortex") was written before broadcasting CortexClaim to ensure
-	// crash-recovery on restart. Now that handlePromotion has succeeded, clear it so
-	// a subsequent clean restart does not re-enter the crash-recovery path. (#176)
-	if err := c.epochStore.PersistRole(""); err != nil {
-		slog.Warn("cluster: failed to clear persisted role after promotion", "err", err)
-	}
 
 	if c.OnBecameCortex != nil {
 		c.OnBecameCortex(epoch)
@@ -1276,7 +1274,20 @@ func (c *ClusterCoordinator) HandleHandoff(fromNodeID string, payload []byte) er
 	if !ok {
 		return fmt.Errorf("HandleHandoff: cannot send ack, peer %q not found", fromNodeID)
 	}
-	return peer.Send(mbp.TypeHandoffAck, ackPayload)
+	if err := peer.Send(mbp.TypeHandoffAck, ackPayload); err != nil {
+		return fmt.Errorf("HandleHandoff: send ack: %w", err)
+	}
+
+	// ACK delivered. The old Cortex will now demote itself. Clear the crash-recovery
+	// breadcrumb so that a subsequent clean restart goes through a normal election
+	// rather than incorrectly re-entering the crash-recovery path. (#176)
+	// If this clear fails, the breadcrumb remains. On the next restart, crash-recovery
+	// fires again — which is safe (idempotent re-promotion) rather than leaving the
+	// cluster without a leader.
+	if err := c.epochStore.PersistRole(""); err != nil {
+		slog.Warn("cluster: failed to clear persisted role after handoff ack", "err", err)
+	}
+	return nil
 }
 
 // SetReconciler wires a Reconciler into the coordinator.
