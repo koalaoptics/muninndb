@@ -527,14 +527,6 @@ document.addEventListener('alpine:init', () => {
         }
         this._prevVaultCount = newVaultCount;
 
-        // Vault count-diff: refresh vault list when a vault is added or removed.
-        // Guard with > 0 on first message (learn current count without triggering a reload).
-        const newVaultCount = msg.data.vaultCount || 0;
-        if (this._prevVaultCount > 0 && newVaultCount !== this._prevVaultCount) {
-          this.loadVaults();
-        }
-        this._prevVaultCount = newVaultCount;
-
         // Re-fetch stats scoped to the selected vault instead of using
         // the global broadcast values.
         this.loadStats();
