@@ -222,6 +222,13 @@ func (rp *RetroactiveProcessor) backoff(ctx context.Context, consecutiveErrors i
 // inference call per micro-batch, then scatters vectors back individually.
 // For EnrichPlugin: processes one engram at a time (LLM call per engram).
 func (rp *RetroactiveProcessor) processBatch(ctx context.Context) bool {
+	// Reset rate/ETA at the start of every pass so stale values from a prior
+	// pass don't leak into the embed-status API response while the processor is idle.
+	rp.statsMu.Lock()
+	rp.stats.RatePerSec = 0
+	rp.stats.ETASeconds = 0
+	rp.statsMu.Unlock()
+
 	skipFlags := rp.skipFlags()
 	total, err := rp.store.CountWithoutFlag(ctx, rp.flagBit, skipFlags)
 	if err != nil {
@@ -325,30 +332,39 @@ func (rp *RetroactiveProcessor) processBatch(ctx context.Context) bool {
 			}
 			rp.statsMu.Lock()
 			rp.stats.Processed++
-			processed := rp.stats.Processed
 			rp.statsMu.Unlock()
+		}
+		microEngrams = microEngrams[:0]
+		microTexts = microTexts[:0]
 
-			if processed%1000 == 0 {
-				elapsed := time.Since(startTime).Seconds()
-				if elapsed > 0 {
-					rate := float64(processed) / elapsed
-					remaining := total - processed
-					etaSeconds := int64(float64(remaining) / rate)
-					rp.statsMu.Lock()
-					rp.stats.RatePerSec = rate
-					rp.stats.ETASeconds = etaSeconds
-					rp.statsMu.Unlock()
-					slog.Info("retroactive processor: progress",
+		// Rate/ETA fires after every micro-batch (not gated on %100 — always update).
+		// Use pass-local count (flushedProcessed - passStart) so rate reflects this
+		// pass's throughput, not the cumulative total across all passes.
+		// Log message fires only at 100-engram boundaries to avoid log spam.
+		rp.statsMu.RLock()
+		flushedProcessed := rp.stats.Processed
+		rp.statsMu.RUnlock()
+		passProcessedSoFar := flushedProcessed - passStart
+		if passProcessedSoFar > 0 {
+			elapsed := time.Since(startTime).Seconds()
+			if elapsed > 0 {
+				rate := float64(passProcessedSoFar) / elapsed
+				remaining := total - passProcessedSoFar
+				etaSeconds := int64(float64(remaining) / rate)
+				rp.statsMu.Lock()
+				rp.stats.RatePerSec = rate
+				rp.stats.ETASeconds = etaSeconds
+				rp.statsMu.Unlock()
+				if passProcessedSoFar%100 == 0 {
+					slog.Info("retroactive: progress",
 						"plugin", rp.plugin.Name(),
-						"processed", processed,
+						"processed", flushedProcessed,
 						"total", total,
 						"rate_per_sec", rate,
 						"eta_seconds", etaSeconds)
 				}
 			}
 		}
-		microEngrams = microEngrams[:0]
-		microTexts = microTexts[:0]
 	}
 
 	for iter.Next() {
@@ -438,11 +454,12 @@ func (rp *RetroactiveProcessor) processBatch(ctx context.Context) bool {
 			runtime.Gosched()
 		}
 
-		if processed%1000 == 0 {
+		passProcessedSoFar := processed - passStart
+		if passProcessedSoFar%100 == 0 {
 			elapsed := time.Since(startTime).Seconds()
 			if elapsed > 0 {
-				rate := float64(processed) / elapsed
-				remaining := total - processed
+				rate := float64(passProcessedSoFar) / elapsed
+				remaining := total - passProcessedSoFar
 				etaSeconds := int64(float64(remaining) / rate)
 
 				rp.statsMu.Lock()

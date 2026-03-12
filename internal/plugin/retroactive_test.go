@@ -676,6 +676,78 @@ func TestRetroactiveProcessor_MissingDigestFlagsDoNotSkipEngram(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Progress rate/ETA tests
+// ---------------------------------------------------------------------------
+
+// TestRetroactiveProcessor_ProgressEvery100 verifies that RatePerSec is populated
+// after fewer than 1000 engrams are processed (i.e., after every micro-batch flush,
+// not only at the 1000-engram boundary).
+func TestRetroactiveProcessor_ProgressEvery100(t *testing.T) {
+	const n = 50 // fewer than 1000, so old code would never update rate
+
+	// Build n engrams for the mock iterator
+	engrams := make([]*Engram, n)
+	for i := range engrams {
+		engrams[i] = &Engram{Content: "text"}
+	}
+
+	store := &mockPluginStore{
+		countResult: int64(n),
+		scanResult:  &mockIterator{engrams: engrams},
+	}
+
+	// maxBatchSize=10 so flushMicroBatch fires after every 10 engrams
+	plugin := &mockEmbedPlugin{
+		mockPlugin: mockPlugin{name: "embed-test", tier: TierEmbed},
+	}
+
+	rp := NewRetroactiveProcessor(store, plugin, DigestEmbed)
+
+	// Sleep a tiny bit so elapsed > 0 during the rate calculation
+	time.Sleep(10 * time.Millisecond)
+
+	rp.processBatch(context.Background())
+
+	stats := rp.Stats()
+	if stats.RatePerSec <= 0 {
+		t.Errorf("expected RatePerSec > 0 after %d engrams, got %v (old code only updated at 1000)", n, stats.RatePerSec)
+	}
+}
+
+// TestRetroactiveProcessor_StaleRateReset verifies that RatePerSec and ETASeconds
+// are zeroed at the start of each processBatch pass so stale values from a prior
+// pass don't leak into the embed-status API response while the processor is idle.
+func TestRetroactiveProcessor_StaleRateReset(t *testing.T) {
+	store := &mockPluginStore{countResult: 0} // zero-work pass to trigger early-return path
+	plugin := &mockEmbedPlugin{
+		mockPlugin: mockPlugin{name: "embed-reset", tier: TierEmbed},
+	}
+
+	rp := NewRetroactiveProcessor(store, plugin, DigestEmbed)
+
+	// Seed non-zero rate/ETA to simulate stale values left over from a prior pass.
+	rp.statsMu.Lock()
+	rp.stats.RatePerSec = 99.9
+	rp.stats.ETASeconds = 9999
+	rp.statsMu.Unlock()
+
+	// processBatch must zero rate/ETA at the very start, before the count check.
+	rp.processBatch(context.Background())
+
+	rp.statsMu.RLock()
+	rate := rp.stats.RatePerSec
+	eta := rp.stats.ETASeconds
+	rp.statsMu.RUnlock()
+
+	if rate != 0 {
+		t.Errorf("expected RatePerSec=0 at new pass start, got %v", rate)
+	}
+	if eta != 0 {
+		t.Errorf("expected ETASeconds=0 at new pass start, got %v", eta)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // processBatch — iterator with nil engram
 // ---------------------------------------------------------------------------
 

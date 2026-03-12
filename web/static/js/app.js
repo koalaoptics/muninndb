@@ -198,19 +198,20 @@ document.addEventListener('alpine:init', () => {
       embedApiKey: '',
       embedUrl: '',           // custom base URL for openai-compatible endpoints
       embedShowForm: false,
-      embedSaved: false,
       embedError: '',
       enrichProvider: 'none', // 'none' | 'ollama' | 'openai' | 'anthropic'
       enrichOllamaModel: 'llama3.2',
       enrichModel: 'claude-haiku-4-5-20251001',
       enrichApiKey: '',
       enrichShowForm: false,
-      enrichSaved: false,
       enrichError: '',
       ollamaModels: [],
       ollamaEmbedModels: [],
       ollamaDetected: null,   // null=unchecked, true=running, false=not found
       ollamaChecking: false,
+      embedRatePerSec: 0,       // from embed-status API: engrams/sec, 0 when idle
+      embedETASecs: 0,          // from embed-status API: seconds until complete, 0 when idle
+      embedHardwareGPU: null,   // null = unknown/cloud; true = GPU; false = CPU-only Ollama
     },
 
     // Vault actions
@@ -1576,11 +1577,20 @@ document.addEventListener('alpine:init', () => {
     // ── Settings ───────────────────────────────────────────────────────────
     async loadEmbedStatus() {
       try {
-        this.embedStatus = await this.apiCall('/api/admin/embed/status');
+        const data = await this.apiCall('/api/admin/embed/status');
+        this.embedStatus = data;
         // Reflect the active provider in the plugin config UI (local is default, not a plugin choice)
-        const p = this.embedStatus?.provider;
+        const p = data?.provider;
         if (p && p !== 'none' && p !== 'local') {
           this.pluginCfg.embedProvider = p;
+        }
+        this.pluginCfg.embedRatePerSec = data.rate_per_sec ?? 0;
+        this.pluginCfg.embedETASecs    = data.eta_seconds ?? 0;
+        // hardware_accelerated is absent for cloud providers; present (true/false) for Ollama
+        if (Object.prototype.hasOwnProperty.call(data, 'hardware_accelerated')) {
+          this.pluginCfg.embedHardwareGPU = data.hardware_accelerated;
+        } else {
+          this.pluginCfg.embedHardwareGPU = null;
         }
       } catch (_) {
         // Non-fatal: embedStatus stays null, UI shows fallback
@@ -1887,6 +1897,31 @@ document.addEventListener('alpine:init', () => {
       const embedded = this.embedStatus.embedded_count;
       if (total <= 0 || embedded < 0) return 0;
       return Math.min(100, Math.round((embedded / total) * 100));
+    },
+
+    // Returns a formatted rate string like "0.7s/embedding", or '' when idle.
+    embedSecsPerItem() {
+      if (this.pluginCfg.embedRatePerSec > 0) {
+        return (1 / this.pluginCfg.embedRatePerSec).toFixed(1) + 's/embedding';
+      }
+      return '';
+    },
+
+    // Returns a human-readable ETA string like "~3 min", or '' when idle.
+    embedETADisplay() {
+      const secs = this.pluginCfg.embedETASecs;
+      if (secs <= 0) return '';
+      if (secs < 60) return '< 1 min';
+      const mins = Math.round(secs / 60);
+      if (mins < 60) return '~' + mins + ' min';
+      const hrs = Math.floor(mins / 60);
+      const rem = mins % 60;
+      return rem > 0 ? '~' + hrs + ' hr ' + rem + ' min' : '~' + hrs + ' hr';
+    },
+
+    // True only when Ollama is the embed provider and hardware_accelerated is explicitly false.
+    get embedIsCPU() {
+      return this.pluginCfg.embedHardwareGPU === false;
     },
 
     // ── Cluster ────────────────────────────────────────────────────────────
@@ -2289,9 +2324,7 @@ document.addEventListener('alpine:init', () => {
     // ── Plugin config save ───────────────────────────────────────────────────
     async savePluginConfig(section) {
       const c = this.pluginCfg;
-      const savedKey = section + 'Saved';
       const errorKey = section + 'Error';
-      c[savedKey] = false;
       c[errorKey] = '';
 
       // Build payload from current pluginCfg state.
@@ -2310,8 +2343,9 @@ document.addEventListener('alpine:init', () => {
 
       try {
         await this.apiCall('/api/admin/plugin-config', { method: 'PUT', body: JSON.stringify(payload) });
-        c[savedKey] = true;
-        setTimeout(() => { c[savedKey] = false; }, 4000);
+        this.addNotification('success', section === 'embed'
+          ? 'Embedding provider saved — restart MuninnDB to apply.'
+          : 'Enrichment provider saved — restart MuninnDB to apply.');
         if (section === 'embed') c.embedShowForm = false;
         if (section === 'enrich') c.enrichShowForm = false;
       } catch (e) {
