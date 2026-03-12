@@ -1608,42 +1608,6 @@
                 </div>
               </div>
 
-              <!-- Cohere key field -->
-              <div x-show="pluginCfg.embedProvider==='cohere'" style="margin-bottom:1rem;">
-                <div class="form-group">
-                  <label>Cohere API Key</label>
-                  <input class="input-field" type="password" x-model="pluginCfg.embedApiKey" placeholder="..." autocomplete="off" />
-                </div>
-              </div>
-
-              <!-- Google key field -->
-              <div x-show="pluginCfg.embedProvider==='google'" style="margin-bottom:1rem;">
-                <div class="form-group">
-                  <label>Google API Key</label>
-                  <input class="input-field" type="password" x-model="pluginCfg.embedApiKey" placeholder="..." autocomplete="off" />
-                </div>
-              </div>
-
-              <!-- Mistral key field -->
-              <div x-show="pluginCfg.embedProvider==='mistral'" style="margin-bottom:1rem;">
-                <div class="form-group">
-                  <label>Mistral API Key</label>
-                  <input class="input-field" type="password" x-model="pluginCfg.embedApiKey" placeholder="..." autocomplete="off" />
-                </div>
-              </div>
-
-              <!-- Jina key field -->
-              <div x-show="pluginCfg.embedProvider==='jina'" style="margin-bottom:1rem;">
-                <div class="form-group">
-                  <label>Jina API Key</label>
-                  <input class="input-field" type="password" x-model="pluginCfg.embedApiKey" placeholder="jina_..." autocomplete="off" />
-                </div>
-              </div>
-
-              <!-- Built-in: no configuration needed -->
-              <div x-show="pluginCfg.embedProvider==='local'" style="margin-bottom:1rem;">
-                <div style="font-size:0.8125rem;color:var(--text-muted);">No API key required. The built-in model runs fully locally.</div>
-              </div>
 
               <div style="display:flex;gap:0.625rem;align-items:center;margin-bottom:0.875rem;">
                 <button class="btn-primary" style="font-size:0.8125rem;" @click="savePluginConfig('embed')">Save</button>
