@@ -198,14 +198,12 @@ document.addEventListener('alpine:init', () => {
       embedApiKey: '',
       embedUrl: '',           // custom base URL for openai-compatible endpoints
       embedShowForm: false,
-      embedSaved: false,
       embedError: '',
       enrichProvider: 'none', // 'none' | 'ollama' | 'openai' | 'anthropic'
       enrichOllamaModel: 'llama3.2',
       enrichModel: 'claude-haiku-4-5-20251001',
       enrichApiKey: '',
       enrichShowForm: false,
-      enrichSaved: false,
       enrichError: '',
       ollamaModels: [],
       ollamaEmbedModels: [],
@@ -2289,9 +2287,7 @@ document.addEventListener('alpine:init', () => {
     // ── Plugin config save ───────────────────────────────────────────────────
     async savePluginConfig(section) {
       const c = this.pluginCfg;
-      const savedKey = section + 'Saved';
       const errorKey = section + 'Error';
-      c[savedKey] = false;
       c[errorKey] = '';
 
       // Build payload from current pluginCfg state.
@@ -2310,8 +2306,9 @@ document.addEventListener('alpine:init', () => {
 
       try {
         await this.apiCall('/api/admin/plugin-config', { method: 'PUT', body: JSON.stringify(payload) });
-        c[savedKey] = true;
-        setTimeout(() => { c[savedKey] = false; }, 4000);
+        this.addNotification('success', section === 'embed'
+          ? 'Embedding provider saved — restart MuninnDB to apply.'
+          : 'Enrichment provider saved — restart MuninnDB to apply.');
         if (section === 'embed') c.embedShowForm = false;
         if (section === 'enrich') c.enrichShowForm = false;
       } catch (e) {

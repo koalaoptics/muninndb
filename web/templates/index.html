@@ -1473,7 +1473,6 @@
                 <template x-if="pluginCfg.embedShowForm">
                   <button class="btn-ghost" style="font-size:0.8125rem;" @click="pluginCfg.embedShowForm=false">Cancel</button>
                 </template>
-                <span x-show="pluginCfg.embedSaved" style="font-size:0.8125rem;color:var(--success,#22c55e);">Saved — restart MuninnDB to apply.</span>
                 <span x-show="pluginCfg.embedError" x-text="pluginCfg.embedError" style="font-size:0.8125rem;color:var(--danger,#ef4444);"></span>
               </div>
 
@@ -1629,7 +1628,6 @@
                 <template x-if="pluginCfg.enrichShowForm">
                   <button class="btn-ghost" style="font-size:0.8125rem;" @click="pluginCfg.enrichShowForm=false">Cancel</button>
                 </template>
-                <span data-testid="enrich-saved-msg" x-show="pluginCfg.enrichSaved" style="font-size:0.8125rem;color:var(--success,#22c55e);">Saved — restart MuninnDB to apply.</span>
                 <span x-show="pluginCfg.enrichError" x-text="pluginCfg.enrichError" style="font-size:0.8125rem;color:var(--danger,#ef4444);"></span>
               </div>
             </div>
