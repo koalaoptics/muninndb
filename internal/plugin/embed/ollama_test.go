@@ -98,10 +98,19 @@ func TestOllamaProvider_Embed(t *testing.T) {
 	}
 }
 
-func TestOllamaProvider_MaxBatchSize(t *testing.T) {
+func TestOllamaProvider_MaxBatchSize_Default(t *testing.T) {
+	// A fresh provider (useLegacyAPI=false) should return 64
 	provider := &OllamaProvider{}
+	if provider.MaxBatchSize() != 64 {
+		t.Errorf("expected batch size 64 (new batch endpoint), got %d", provider.MaxBatchSize())
+	}
+}
+
+func TestOllamaProvider_MaxBatchSize_Legacy(t *testing.T) {
+	// When legacy API is forced, MaxBatchSize must return 1
+	provider := &OllamaProvider{useLegacyAPI: true}
 	if provider.MaxBatchSize() != 1 {
-		t.Errorf("expected batch size 1, got %d", provider.MaxBatchSize())
+		t.Errorf("expected batch size 1 in legacy mode, got %d", provider.MaxBatchSize())
 	}
 }
 
