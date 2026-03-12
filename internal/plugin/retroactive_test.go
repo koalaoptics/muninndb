@@ -676,6 +676,96 @@ func TestRetroactiveProcessor_MissingDigestFlagsDoNotSkipEngram(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Progress rate/ETA tests
+// ---------------------------------------------------------------------------
+
+// TestRetroactiveProcessor_ProgressEvery100 verifies that RatePerSec is populated
+// after fewer than 1000 engrams are processed (i.e., after every micro-batch flush,
+// not only at the 1000-engram boundary).
+func TestRetroactiveProcessor_ProgressEvery100(t *testing.T) {
+	const n = 50 // fewer than 1000, so old code would never update rate
+
+	// Build n engrams for the mock iterator
+	engrams := make([]*Engram, n)
+	for i := range engrams {
+		engrams[i] = &Engram{Content: "text"}
+	}
+
+	store := &mockPluginStore{
+		countResult: int64(n),
+		scanResult:  &mockIterator{engrams: engrams},
+	}
+
+	// maxBatchSize=10 so flushMicroBatch fires after every 10 engrams
+	plugin := &mockEmbedPlugin{
+		mockPlugin: mockPlugin{name: "embed-test", tier: TierEmbed},
+	}
+
+	rp := NewRetroactiveProcessor(store, plugin, DigestEmbed)
+
+	// Sleep a tiny bit so elapsed > 0 during the rate calculation
+	time.Sleep(10 * time.Millisecond)
+
+	rp.processBatch(context.Background())
+
+	stats := rp.Stats()
+	if stats.RatePerSec <= 0 {
+		t.Errorf("expected RatePerSec > 0 after %d engrams, got %v (old code only updated at 1000)", n, stats.RatePerSec)
+	}
+}
+
+// TestRetroactiveProcessor_StaleRateReset verifies that RatePerSec and ETASeconds
+// are zeroed at the start of each processBatch pass so stale values from a prior
+// pass don't leak into the embed-status API response while the processor is idle.
+func TestRetroactiveProcessor_StaleRateReset(t *testing.T) {
+	const n = 5
+
+	engrams := make([]*Engram, n)
+	for i := range engrams {
+		engrams[i] = &Engram{Content: "text"}
+	}
+
+	store := &mockPluginStore{
+		countResult: int64(n),
+		scanResult:  &mockIterator{engrams: engrams},
+	}
+	plugin := &mockEmbedPlugin{
+		mockPlugin: mockPlugin{name: "embed-reset", tier: TierEmbed},
+	}
+
+	rp := NewRetroactiveProcessor(store, plugin, DigestEmbed)
+
+	// Seed non-zero rate/ETA as if a prior pass ran
+	rp.statsMu.Lock()
+	rp.stats.RatePerSec = 99.9
+	rp.stats.ETASeconds = 9999
+	rp.statsMu.Unlock()
+
+	// Run a new pass — processBatch must zero rate/ETA before starting
+	// A pass with countResult=0 would skip processing, so use n>0 but reset happens first
+	store2 := &mockPluginStore{countResult: 0} // zero work pass
+	rp2 := NewRetroactiveProcessor(store2, plugin, DigestEmbed)
+	rp2.statsMu.Lock()
+	rp2.stats.RatePerSec = 99.9
+	rp2.stats.ETASeconds = 9999
+	rp2.statsMu.Unlock()
+
+	rp2.processBatch(context.Background()) // triggers the reset path at pass start
+
+	rp2.statsMu.RLock()
+	rate := rp2.stats.RatePerSec
+	eta := rp2.stats.ETASeconds
+	rp2.statsMu.RUnlock()
+
+	if rate != 0 {
+		t.Errorf("expected RatePerSec=0 at new pass start, got %v", rate)
+	}
+	if eta != 0 {
+		t.Errorf("expected ETASeconds=0 at new pass start, got %v", eta)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // processBatch — iterator with nil engram
 // ---------------------------------------------------------------------------
 
