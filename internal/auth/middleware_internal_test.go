@@ -45,3 +45,32 @@ func TestReadOnlyGuard_BlocksObserveMode(t *testing.T) {
 		t.Fatal("inner handler should not be reached")
 	}
 }
+
+func TestReadOnlyGuard_ErrorEnvelopeMatchesWriteOnlyGuard(t *testing.T) {
+	readOnlyReq := httptest.NewRequest(http.MethodPost, "/", nil)
+	readOnlyReq = readOnlyReq.WithContext(context.WithValue(readOnlyReq.Context(), ContextMode, ModeObserve))
+	readOnlyResp := httptest.NewRecorder()
+	ReadOnlyGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("read-only inner handler should not run")
+	}))(readOnlyResp, readOnlyReq)
+
+	writeOnlyReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	writeOnlyReq = writeOnlyReq.WithContext(context.WithValue(writeOnlyReq.Context(), ContextMode, ModeWrite))
+	writeOnlyResp := httptest.NewRecorder()
+	WriteOnlyGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("write-only inner handler should not run")
+	}))(writeOnlyResp, writeOnlyReq)
+
+	if got, want := readOnlyResp.Header().Get("Content-Type"), writeOnlyResp.Header().Get("Content-Type"); got != want {
+		t.Fatalf("content-type mismatch: got %q want %q", got, want)
+	}
+	if got, want := readOnlyResp.Code, writeOnlyResp.Code; got != want {
+		t.Fatalf("status mismatch: got %d want %d", got, want)
+	}
+	if got := readOnlyResp.Body.String(); got != `{"error":{"code":"FORBIDDEN","message":"read-only key cannot write"}}` {
+		t.Fatalf("unexpected read-only body: %s", got)
+	}
+	if got := writeOnlyResp.Body.String(); got != `{"error":{"code":"FORBIDDEN","message":"write-only key cannot read"}}` {
+		t.Fatalf("unexpected write-only body: %s", got)
+	}
+}

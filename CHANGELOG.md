@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vault-scoped REST routes now resolve non-default vaults consistently from authenticated request bodies as well as `?vault=`, and reject mismatched query/body vaults.
 - Vault-scoped REST routes are setup to deprecate vault passed in the body in a later release.
 - REST read responses now include `memory_type: 0` for fact-classified memories instead of omitting the field.
+- Observe-mode API keys now return `403` on semantically mutating REST routes while preserving access to read-like POST endpoints such as activation, traversal, explanation, and batch link reads.
+- Public vault requests continue to run in observe mode, and the route-level permission tests now exercise mutating paths with explicit full-access API keys instead of relying on public no-key writes.
 
 ---
 

@@ -241,6 +241,71 @@ func TestReadOnlyMode_SemanticReadHandlersPassThrough(t *testing.T) {
 	}
 }
 
+func TestReadOnlyMode_PublicVaultMutationsReturn403(t *testing.T) {
+	store := newTestAuthStore(t)
+	if err := store.SetVaultConfig(auth.VaultConfig{Name: "default", Public: true}); err != nil {
+		t.Fatalf("SetVaultConfig: %v", err)
+	}
+	s := newTestServer(t, store)
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{"CreateEngram", http.MethodPost, "/api/engrams?vault=default", `{"concept":"test","content":"hello"}`},
+		{"BatchCreate", http.MethodPost, "/api/engrams/batch?vault=default", `{"engrams":[{"concept":"a","content":"x"}]}`},
+		{"DeleteEngram", http.MethodDelete, "/api/engrams/some-id?vault=default", ``},
+		{"Link", http.MethodPost, "/api/link?vault=default", `{"source_id":"id1","target_id":"id2","rel_type":1}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			w := httptest.NewRecorder()
+			s.mux.ServeHTTP(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestReadOnlyMode_PublicVaultSemanticReadEndpointsPassThrough(t *testing.T) {
+	store := newTestAuthStore(t)
+	if err := store.SetVaultConfig(auth.VaultConfig{Name: "default", Public: true}); err != nil {
+		t.Fatalf("SetVaultConfig: %v", err)
+	}
+	s := newTestServer(t, store)
+
+	cases := []struct {
+		name string
+		path string
+		body string
+	}{
+		{"Activate", "/api/activate?vault=default", `{"context":["x"]}`},
+		{"BatchGetEngramLinks", "/api/engrams/links/batch?vault=default", `{"ids":["id1"]}`},
+		{"Traverse", "/api/traverse?vault=default", `{"start_id":"root-id"}`},
+		{"Explain", "/api/explain?vault=default", `{"engram_id":"some-id"}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			s.mux.ServeHTTP(w, req)
+			if w.Code == http.StatusForbidden {
+				t.Fatalf("expected non-403 response, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 // TestWriteOnlyGuard_UnknownModePassesThrough verifies that unrecognised or
 // empty mode strings are treated as non-write-only (pass through the guard).
 // WriteOnlyGuard uses exact-equality so garbage values are safe by default.

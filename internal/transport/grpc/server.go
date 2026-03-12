@@ -45,6 +45,13 @@ type Server struct {
 	tlsConfig *tls.Config // nil = plain TCP
 }
 
+func denyReadOnlyMutation(ctx context.Context) error {
+	if auth.ReadOnlyFromContext(ctx) {
+		return status.Error(codes.PermissionDenied, "read-only key cannot write")
+	}
+	return nil
+}
+
 // NewServer creates a new gRPC server.
 // authStore is required and used to validate API keys on every inbound RPC.
 // tlsConfig, if non-nil, enables TLS using gRPC transport credentials.
@@ -234,6 +241,9 @@ func (s *Server) Hello(ctx context.Context, req *pb.HelloRequest) (*pb.HelloResp
 
 // Write implements the Write RPC.
 func (s *Server) Write(ctx context.Context, req *pb.WriteRequest) (*pb.WriteResponse, error) {
+	if err := denyReadOnlyMutation(ctx); err != nil {
+		return nil, err
+	}
 	resp, err := s.engine.Write(ctx, req)
 	if err != nil {
 		slog.Error("write failed", "error", err)
@@ -244,6 +254,9 @@ func (s *Server) Write(ctx context.Context, req *pb.WriteRequest) (*pb.WriteResp
 
 // BatchWrite implements the BatchWrite RPC.
 func (s *Server) BatchWrite(ctx context.Context, req *pb.BatchWriteRequest) (*pb.BatchWriteResponse, error) {
+	if err := denyReadOnlyMutation(ctx); err != nil {
+		return nil, err
+	}
 	resp, err := s.engine.BatchWrite(ctx, req)
 	if err != nil {
 		slog.Error("batch write failed", "error", err)
@@ -264,6 +277,9 @@ func (s *Server) Read(ctx context.Context, req *pb.ReadRequest) (*pb.ReadRespons
 
 // Forget implements the Forget RPC.
 func (s *Server) Forget(ctx context.Context, req *pb.ForgetRequest) (*pb.ForgetResponse, error) {
+	if err := denyReadOnlyMutation(ctx); err != nil {
+		return nil, err
+	}
 	resp, err := s.engine.Forget(ctx, req)
 	if err != nil {
 		slog.Error("forget failed", "error", err)
@@ -284,6 +300,9 @@ func (s *Server) Stat(ctx context.Context, req *pb.StatRequest) (*pb.StatRespons
 
 // Link implements the Link RPC.
 func (s *Server) Link(ctx context.Context, req *pb.LinkRequest) (*pb.LinkResponse, error) {
+	if err := denyReadOnlyMutation(ctx); err != nil {
+		return nil, err
+	}
 	resp, err := s.engine.Link(ctx, req)
 	if err != nil {
 		slog.Error("link failed", "error", err)
