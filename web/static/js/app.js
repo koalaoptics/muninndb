@@ -808,10 +808,10 @@ document.addEventListener('alpine:init', () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ state: 'archived' }),
           });
-          await fetch('/api/admin/contradictions/resolve', {
+          await fetch('/api/admin/contradictions/resolve?vault=' + encodeURIComponent(vault), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vault, id_a: idA, id_b: idB }),
+            body: JSON.stringify({ id_a: idA, id_b: idB }),
           });
         } else if (action === 'keep_b') {
           // B supersedes A; archive A
@@ -825,16 +825,16 @@ document.addEventListener('alpine:init', () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ state: 'archived' }),
           });
-          await fetch('/api/admin/contradictions/resolve', {
+          await fetch('/api/admin/contradictions/resolve?vault=' + encodeURIComponent(vault), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vault, id_a: idA, id_b: idB }),
+            body: JSON.stringify({ id_a: idA, id_b: idB }),
           });
         } else if (action === 'dismiss') {
-          await fetch('/api/admin/contradictions/resolve', {
+          await fetch('/api/admin/contradictions/resolve?vault=' + encodeURIComponent(vault), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vault, id_a: idA, id_b: idB }),
+            body: JSON.stringify({ id_a: idA, id_b: idB }),
           });
         } else if (action === 'merge') {
           // Open consolidate modal pre-filled with both IDs
