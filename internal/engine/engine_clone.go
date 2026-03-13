@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/scrypster/muninndb/internal/engine/vaultjob"
 	"github.com/scrypster/muninndb/internal/index/fts"
@@ -264,7 +265,9 @@ func (e *Engine) runMerge(job *vaultjob.Job, wsSource, wsTarget [8]byte, sourceV
 	if deleteSource {
 		deleteCtx := ctx
 		if ctx.Err() != nil {
-			deleteCtx = context.Background()
+			var cancel context.CancelFunc
+			deleteCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 		}
 		if err := e.deleteVault(deleteCtx, sourceVault); err != nil {
 			e.jobManager.Fail(job, fmt.Errorf("post-merge source cleanup: %w", err))

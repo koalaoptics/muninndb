@@ -257,7 +257,9 @@ func TestNetworkStreamer_CatchesUpExistingEntries(t *testing.T) {
 	}
 
 	cancel()
-	<-streamErr
+	if err := <-streamErr; err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+		t.Fatalf("Stream returned unexpected error: %v", err)
+	}
 }
 
 // TestNetworkStreamer_ContextCancel verifies that Stream() returns promptly

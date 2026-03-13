@@ -567,5 +567,8 @@ func (ps *PebbleStore) LowestRelevanceIDs(ctx context.Context, wsPrefix [8]byte,
 			ids = append(ids, id)
 		}
 	}
+	if err := iter.Error(); err != nil {
+		return nil, fmt.Errorf("lowest relevance iter scan: %w", err)
+	}
 	return ids, nil
 }
