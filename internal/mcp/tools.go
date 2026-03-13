@@ -169,7 +169,7 @@ func allToolDefinitions() []ToolDefinition {
 		},
 		{
 			Name:        "muninn_read",
-			Description: "Fetch a single memory by its ID.",
+			Description: "Fetch a single memory by its ID. Returns full content plus any linked entities (name, type) and entity relationships (from_entity, to_entity, rel_type) that were stored with the memory.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
