@@ -59,8 +59,9 @@ type Server struct {
 	tlsConfig     *tls.Config // nil = plain TCP
 
 	// Embedder info — set at construction time, static for the lifetime of the server.
-	embedProvider string // "ollama", "openai", "voyage", or "none"
-	embedModel    string // model name, or "" if none
+	embedProvider            string // "ollama", "openai", "voyage", or "none"
+	embedModel               string // model name, or "" if none
+	embedHardwareAccelerated *bool  // nil for cloud/noop providers; true/false for Ollama
 
 	// Enrichment info — set at construction time, static for the lifetime of the server.
 	enrichProvider string // "ollama", "openai", "anthropic", or ""
@@ -97,8 +98,9 @@ type Server struct {
 
 // EmbedInfo carries static embedder metadata set at server construction time.
 type EmbedInfo struct {
-	Provider string // "ollama", "openai", "voyage", or "none"
-	Model    string // model name, or ""
+	Provider            string // "ollama", "openai", "voyage", or "none"
+	Model               string // model name, or ""
+	HardwareAccelerated *bool  // nil for cloud/noop providers; true/false for Ollama
 }
 
 // EnrichInfo carries static enrichment metadata set at server construction time.
@@ -120,22 +122,23 @@ type MCPInfo struct {
 func NewServer(addr string, engine EngineAPI, authStore *auth.Store, sessionSecret []byte, corsOrigins []string, embedInfo EmbedInfo, enrichInfo EnrichInfo, pluginRegistry *plugin.Registry, dataDir string, tlsConfig *tls.Config, mcpInfo ...MCPInfo) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
-		addr:           addr,
-		engine:         engine,
-		authStore:      authStore,
-		sessionSecret:  sessionSecret,
-		corsOrigins:    corsOrigins,
-		mux:            mux,
-		embedProvider:  embedInfo.Provider,
-		embedModel:     embedInfo.Model,
-		enrichProvider: enrichInfo.Provider,
-		enrichModel:    enrichInfo.Model,
-		pluginRegistry: pluginRegistry,
-		dataDir:        dataDir,
-		tlsConfig:      tlsConfig,
-		startTime:      time.Now(),
-		shutdown:       make(chan struct{}),
-		ready:          make(chan struct{}),
+		addr:                     addr,
+		engine:                   engine,
+		authStore:                authStore,
+		sessionSecret:            sessionSecret,
+		corsOrigins:              corsOrigins,
+		mux:                      mux,
+		embedProvider:            embedInfo.Provider,
+		embedModel:               embedInfo.Model,
+		embedHardwareAccelerated: embedInfo.HardwareAccelerated,
+		enrichProvider:           enrichInfo.Provider,
+		enrichModel:              enrichInfo.Model,
+		pluginRegistry:           pluginRegistry,
+		dataDir:                  dataDir,
+		tlsConfig:                tlsConfig,
+		startTime:                time.Now(),
+		shutdown:                 make(chan struct{}),
+		ready:                    make(chan struct{}),
 	}
 	// Subsystems are considered ready immediately unless explicitly marked otherwise.
 	s.subsystemsReady.Store(true)
@@ -242,8 +245,18 @@ func NewServer(addr string, engine EngineAPI, authStore *auth.Store, sessionSecr
 	mux.HandleFunc("GET /api/admin/cluster/events", s.withAdminMiddleware(s.handleAdminClusterEvents))
 
 	// Build the global and per-IP rate limiters from env vars with fallback defaults.
-	globalRPS := envIntDefault("MUNINN_RATE_LIMIT_GLOBAL_RPS", 1000)
-	perIPRPS := envIntDefault("MUNINN_RATE_LIMIT_PER_IP_RPS", 100)
+	const defaultGlobalRPS = 1000
+	const defaultPerIPRPS = 100
+	globalRPS := envIntDefault("MUNINN_RATE_LIMIT_GLOBAL_RPS", defaultGlobalRPS)
+	if globalRPS <= 0 {
+		slog.Warn("MUNINN_RATE_LIMIT_GLOBAL_RPS is <= 0, using default", "value", globalRPS, "default", defaultGlobalRPS)
+		globalRPS = defaultGlobalRPS
+	}
+	perIPRPS := envIntDefault("MUNINN_RATE_LIMIT_PER_IP_RPS", defaultPerIPRPS)
+	if perIPRPS <= 0 {
+		slog.Warn("MUNINN_RATE_LIMIT_PER_IP_RPS is <= 0, using default", "value", perIPRPS, "default", defaultPerIPRPS)
+		perIPRPS = defaultPerIPRPS
+	}
 	globalLimiter := rate.NewLimiter(rate.Limit(globalRPS), globalRPS*2)
 	ipCache, _ := lru.New[string, *rate.Limiter](50_000)
 
@@ -1071,8 +1084,10 @@ func (s *Server) handleListEngrams(w http.ResponseWriter, r *http.Request) {
 	vault := ctxVault(r)
 
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 20
+	if limit <= 0 {
+		limit = 50
+	} else if limit > 200 {
+		limit = 200
 	}
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	if offset < 0 {
@@ -1534,10 +1549,7 @@ func (s *Server) handleResolveContradiction(w http.ResponseWriter, r *http.Reque
 		s.sendError(r, w, http.StatusBadRequest, ErrInvalidEngram, "id_a and id_b are required")
 		return
 	}
-	vault := req.Vault
-	if vault == "" {
-		vault = ctxVault(r)
-	}
+	vault := ctxVault(r)
 	if err := s.engine.ResolveContradiction(r.Context(), vault, req.IDA, req.IDB); err != nil {
 		s.sendError(r, w, http.StatusInternalServerError, ErrStorageError, err.Error())
 		return
