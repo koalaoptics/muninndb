@@ -254,6 +254,28 @@ func TestMergeEntity_SameEntityRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "must be different")
 }
 
+func TestMergeEntity_AlreadyMergedEntityARejected(t *testing.T) {
+	eng, cleanup := testEnv(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	writeEntityEngram(t, eng, "default", "Postgre SQL legacy",
+		mbp.InlineEntity{Name: "Postgre SQL", Type: "database"})
+	writeEntityEngram(t, eng, "default", "PostgreSQL canonical",
+		mbp.InlineEntity{Name: "PostgreSQL", Type: "database"})
+	writeEntityEngram(t, eng, "default", "PG shorthand",
+		mbp.InlineEntity{Name: "PG", Type: "database"})
+
+	// First merge: A → B succeeds.
+	_, err := eng.MergeEntity(ctx, "default", "Postgre SQL", "PostgreSQL", false)
+	require.NoError(t, err)
+
+	// Second merge of the same A (now state=merged) must be rejected.
+	_, err = eng.MergeEntity(ctx, "default", "Postgre SQL", "PG", false)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already merged", "re-merging a merged entity must return an explicit error")
+}
+
 func TestMergeEntity_DeletesStaleLinksForMergedEntity(t *testing.T) {
 	eng, cleanup := testEnv(t)
 	defer cleanup()

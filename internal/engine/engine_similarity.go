@@ -115,6 +115,12 @@ func (e *Engine) MergeEntity(ctx context.Context, vault, entityA, entityB string
 		return nil, fmt.Errorf("merge_entity: entity_a and entity_b must be different")
 	}
 
+	// Serialise concurrent merges that touch either entity.
+	// Acquired before any reads so the read→check→write sequence is atomic
+	// with respect to other MergeEntity calls on the same entities.
+	e.mergeMu.Lock(entityA, entityB)
+	defer e.mergeMu.Unlock(entityA, entityB)
+
 	ws := e.store.ResolveVaultPrefix(vault)
 
 	recA, err := e.store.GetEntityRecord(ctx, entityA)
@@ -123,6 +129,9 @@ func (e *Engine) MergeEntity(ctx context.Context, vault, entityA, entityB string
 	}
 	if recA == nil {
 		return nil, fmt.Errorf("merge_entity: entity_a %q not found", entityA)
+	}
+	if recA.State == "merged" {
+		return nil, fmt.Errorf("merge_entity: entity_a %q is already merged into %q", entityA, recA.MergedInto)
 	}
 
 	recB, err := e.store.GetEntityRecord(ctx, entityB)
