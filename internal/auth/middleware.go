@@ -14,7 +14,7 @@ import (
 // Vault is resolved from ?vault= query param first, then from JSON request bodies
 // on body-based routes, and finally defaults to "default" when no explicit
 // vault is provided.
-// Public vaults allow unauthenticated access in observe mode.
+// Public vaults allow unauthenticated access in full mode.
 // If a Bearer token is present, it is always validated regardless of vault visibility.
 func (s *Store) VaultAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -64,11 +64,7 @@ func (s *Store) VaultAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		ctx := context.WithValue(r.Context(), ContextVault, vault)
-		// REVIEW(maintainer): public vault requests remain ModeObserve for backward
-		// compatibility with the historical unauthenticated read behavior.
-		// Confirm at PR time whether public unauthenticated access should stay
-		// observe or move to full in a follow-up.
-		ctx = context.WithValue(ctx, ContextMode, ModeObserve)
+		ctx = context.WithValue(ctx, ContextMode, ModeFull)
 		next(w, r.WithContext(ctx))
 	}
 }

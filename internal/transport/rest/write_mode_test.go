@@ -241,7 +241,7 @@ func TestReadOnlyMode_SemanticReadHandlersPassThrough(t *testing.T) {
 	}
 }
 
-func TestReadOnlyMode_PublicVaultMutationsReturn403(t *testing.T) {
+func TestPublicVaultFullModeMutationsPassThrough(t *testing.T) {
 	store := newTestAuthStore(t)
 	if err := store.SetVaultConfig(auth.VaultConfig{Name: "default", Public: true}); err != nil {
 		t.Fatalf("SetVaultConfig: %v", err)
@@ -268,8 +268,8 @@ func TestReadOnlyMode_PublicVaultMutationsReturn403(t *testing.T) {
 			}
 			w := httptest.NewRecorder()
 			s.mux.ServeHTTP(w, req)
-			if w.Code != http.StatusForbidden {
-				t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+			if w.Code == http.StatusForbidden {
+				t.Fatalf("expected non-403 response, got %d: %s", w.Code, w.Body.String())
 			}
 		})
 	}

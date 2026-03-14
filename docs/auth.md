@@ -48,7 +48,7 @@ Admin credentials authenticate to:
 
 A vault is either **open** (no API key required) or **locked** (API key required). The built-in `default` vault ships **open** out of the box so that any MCP client can connect without configuration. Additional vaults you create start locked and must be explicitly opened.
 
-Open vault requests currently run in `observe` mode unless a caller presents a different API key. That preserves the historical unauthenticated read behavior while avoiding cognitive-state writes from anonymous traffic.
+Open vault requests currently run in `full` mode unless a caller presents a different API key. Use an `observe` key when you need read access without cognitive-state writes.
 
 A vault can have multiple API keys — one per integration point. You might have:
 

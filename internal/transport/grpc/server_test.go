@@ -378,7 +378,7 @@ func TestAuthUnaryInterceptor_InvalidKey(t *testing.T) {
 
 // TestAuthUnaryInterceptor_NoKeyPublicVault configures the default vault as
 // public, sends a request without any auth metadata, and verifies the handler
-// is called with vault "default" and mode "observe".
+// is called with vault "default" and mode "full".
 func TestAuthUnaryInterceptor_NoKeyPublicVault(t *testing.T) {
 	store := newTestAuthStore(t)
 	if err := store.SetVaultConfig(auth.VaultConfig{Name: "default", Public: true}); err != nil {
@@ -405,8 +405,8 @@ func TestAuthUnaryInterceptor_NoKeyPublicVault(t *testing.T) {
 	if capturedVault != "default" {
 		t.Errorf("vault = %q, want \"default\"", capturedVault)
 	}
-	if capturedMode != "observe" {
-		t.Errorf("mode = %q, want \"observe\"", capturedMode)
+	if capturedMode != "full" {
+		t.Errorf("mode = %q, want \"full\"", capturedMode)
 	}
 }
 
@@ -635,8 +635,8 @@ func TestAuthStreamInterceptor_NoKeyPublicVault(t *testing.T) {
 	if capturedVault != "default" {
 		t.Errorf("vault = %q, want \"default\"", capturedVault)
 	}
-	if capturedMode != "observe" {
-		t.Errorf("mode = %q, want \"observe\"", capturedMode)
+	if capturedMode != "full" {
+		t.Errorf("mode = %q, want \"full\"", capturedMode)
 	}
 }
 
@@ -694,7 +694,7 @@ func TestAuthStreamInterceptor_XApiKey(t *testing.T) {
 	}
 }
 
-func TestPublicVaultObserveMutatingUnaryRPCsDenied(t *testing.T) {
+func TestPublicVaultFullMutatingUnaryRPCsAllowed(t *testing.T) {
 	store := newTestAuthStore(t)
 	if err := store.SetVaultConfig(auth.VaultConfig{Name: "default", Public: true}); err != nil {
 		t.Fatalf("SetVaultConfig: %v", err)
@@ -724,10 +724,10 @@ func TestPublicVaultObserveMutatingUnaryRPCsDenied(t *testing.T) {
 	}, store, nil)
 
 	cases := []struct {
-		name    string
-		req     any
-		invoke  func(context.Context, any) (any, error)
-		called  *bool
+		name   string
+		req    any
+		invoke func(context.Context, any) (any, error)
+		called *bool
 	}{
 		{
 			name:   "Write",
@@ -736,9 +736,11 @@ func TestPublicVaultObserveMutatingUnaryRPCsDenied(t *testing.T) {
 			called: &writeCalled,
 		},
 		{
-			name:   "BatchWrite",
-			req:    &pb.BatchWriteRequest{Requests: []*pb.WriteRequest{{Vault: "default", Concept: "a", Content: "x"}}},
-			invoke: func(ctx context.Context, req any) (any, error) { return srv.BatchWrite(ctx, req.(*pb.BatchWriteRequest)) },
+			name: "BatchWrite",
+			req:  &pb.BatchWriteRequest{Requests: []*pb.WriteRequest{{Vault: "default", Concept: "a", Content: "x"}}},
+			invoke: func(ctx context.Context, req any) (any, error) {
+				return srv.BatchWrite(ctx, req.(*pb.BatchWriteRequest))
+			},
 			called: &batchWriteCalled,
 		},
 		{
@@ -761,21 +763,11 @@ func TestPublicVaultObserveMutatingUnaryRPCsDenied(t *testing.T) {
 			_, err := srv.TestableAuthUnaryInterceptor(context.Background(), tc.req, nil, func(ctx context.Context, req any) (any, error) {
 				return tc.invoke(ctx, req)
 			})
-			if err == nil {
-				t.Fatal("expected permission error, got nil")
+			if err != nil {
+				t.Fatalf("expected success, got %v", err)
 			}
-			st, ok := status.FromError(err)
-			if !ok {
-				t.Fatalf("error is not a gRPC status: %v", err)
-			}
-			if st.Code() != codes.PermissionDenied {
-				t.Fatalf("code = %v, want PermissionDenied", st.Code())
-			}
-			if st.Message() != "read-only key cannot write" {
-				t.Fatalf("message = %q, want %q", st.Message(), "read-only key cannot write")
-			}
-			if *tc.called {
-				t.Fatal("engine method should not be called for observe/public access")
+			if !*tc.called {
+				t.Fatal("engine method should be called for public full-mode access")
 			}
 		})
 	}
