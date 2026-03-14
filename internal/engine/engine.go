@@ -153,6 +153,29 @@ type Engine struct {
 	// Set via SetEnrichPlugin after construction.
 	enrichPlugin plugin.EnrichPlugin
 
+	// replayEnrichTimeout, when positive, caps each per-engram LLM enrichment
+	// call during ReplayEnrichment. Decouples the per-request timeout from the
+	// MCP request context deadline. Set via SetReplayEnrichTimeout.
+	// Useful for Ollama cold-start scenarios (MUNINN_ENRICH_TIMEOUT env var).
+	replayEnrichTimeout time.Duration
+
+	// replayFailMu guards replayFailCounts for atomic read-modify-write.
+	// A plain mutex + map is used instead of sync.Map to avoid the TOCTOU
+	// race inherent in Load-then-Store on sync.Map.
+	replayFailMu sync.Mutex
+	// replayFailCounts tracks how many times each engram has consecutively
+	// failed enrichment during replay calls in this server session.
+	// After maxReplayFails failures, the engram is skipped by subsequent
+	// ReplayEnrichment calls. Keys are storage.ULID; values are int.
+	// Resets on server restart. Cleared per-engram by ResetReplayFailCount.
+	replayFailCounts map[storage.ULID]int
+
+	// mergeMu serialises concurrent MergeEntity calls that touch the same entities.
+	// Uses a dedicated stripe array separate from the storage-layer entity locks to
+	// avoid reentrancy deadlock (UpsertEntityRecord acquires storage stripes internally).
+	// See merge_guard.go for the full concurrency contract.
+	mergeMu mergeGuard
+
 	// noveltyJobsDropped counts novelty jobs silently dropped because the channel was full.
 	noveltyJobsDropped atomic.Int64
 
@@ -323,7 +346,8 @@ func NewEngine(
 		stopCtx:          stopCtx,
 		stopCancel:       stopCancel,
 		hnswRegistry:     hnswRegistry,
-		jobManager:       vaultjob.NewManager(),
+		jobManager:          vaultjob.NewManager(),
+		replayFailCounts:    make(map[storage.ULID]int),
 	}
 	// Start async novelty worker to decouple O(N) Jaccard scan from write hot path.
 	// engine:spawn-ok — tracked by noveltyDone channel, drained in Stop()
@@ -1409,6 +1433,35 @@ func (e *Engine) Read(ctx context.Context, req *mbp.ReadRequest) (*mbp.ReadRespo
 		e.scoring.RecordFeedback(e.stopCtx, wsPrefix, signal)
 	})
 
+	// Collect entities linked to this engram (0x20 forward index).
+	var entities []mbp.InlineEntity
+	_ = e.store.ScanEngramEntities(ctx, wsPrefix, id, func(name string) error {
+		rec, err := e.store.GetEntityRecord(ctx, name)
+		if err != nil || rec == nil {
+			entities = append(entities, mbp.InlineEntity{Name: name})
+			return nil
+		}
+		entities = append(entities, mbp.InlineEntity{Name: rec.Name, Type: rec.Type})
+		return nil
+	})
+
+	// Collect entity-to-entity relationships sourced from this engram (0x21 prefix).
+	// co_occurs_with records are engine-generated side effects (not caller-provided) and
+	// are excluded — use muninn_entity to explore co-occurrence data.
+	var entityRels []mbp.InlineEntityRelationship
+	_ = e.store.ScanEngramRelationships(ctx, wsPrefix, id, func(r storage.RelationshipRecord) error {
+		if r.RelType == "co_occurs_with" {
+			return nil
+		}
+		entityRels = append(entityRels, mbp.InlineEntityRelationship{
+			FromEntity: r.FromEntity,
+			ToEntity:   r.ToEntity,
+			RelType:    r.RelType,
+			Weight:     r.Weight,
+		})
+		return nil
+	})
+
 	d := time.Since(readStart)
 	if e.latencyTracker != nil {
 		e.latencyTracker.Record(wsPrefix, "read", d)
@@ -1431,9 +1484,11 @@ func (e *Engine) Read(ctx context.Context, req *mbp.ReadRequest) (*mbp.ReadRespo
 		Summary:        eng.Summary,
 		KeyPoints:      eng.KeyPoints,
 		MemoryType:     uint8(eng.MemoryType),
-		TypeLabel:      eng.TypeLabel,
-		Classification: eng.Classification,
-		EmbedDim:       uint8(eng.EmbedDim),
+		TypeLabel:           eng.TypeLabel,
+		Classification:      eng.Classification,
+		EmbedDim:            uint8(eng.EmbedDim),
+		Entities:            entities,
+		EntityRelationships: entityRels,
 	}, nil
 }
 

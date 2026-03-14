@@ -169,7 +169,7 @@ func allToolDefinitions() []ToolDefinition {
 		},
 		{
 			Name:        "muninn_read",
-			Description: "Fetch a single memory by its ID.",
+			Description: "Fetch a single memory by its ID. Returns full content plus any caller-provided entities (name, type) and entity relationships (from_entity, to_entity, rel_type) that were stored with the memory. Engine-generated co-occurrence data is excluded; use muninn_entity for that.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -408,16 +408,43 @@ func allToolDefinitions() []ToolDefinition {
 		// Entity lifecycle state tool
 		{
 			Name:        "muninn_entity_state",
-			Description: "Set the lifecycle state of a named entity (active, deprecated, merged, resolved). For state=merged, provide merged_into with the canonical entity name.",
+			Description: "Set the lifecycle state of a named entity (active, deprecated, merged, resolved) and optionally correct its type. For state=merged, provide merged_into with the canonical entity name. The type field is optional — omit it to preserve the existing type.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"entity_name": map[string]any{"type": "string", "description": "The entity name to update"},
 					"state":       map[string]any{"type": "string", "description": "New state: active, deprecated, merged, or resolved"},
 					"merged_into": map[string]any{"type": "string", "description": "Canonical entity name (required when state=merged)"},
+					"type":        map[string]any{"type": "string", "description": "Correct the entity type (e.g. 'directive', 'protocol', 'module'). Omit to preserve the existing type."},
 					"vault":       vaultProp,
 				},
 				"required": []string{"entity_name", "state"},
+			},
+		},
+		// Batch entity lifecycle state tool
+		{
+			Name:        "muninn_entity_state_batch",
+			Description: "Update lifecycle state (and optionally type) for multiple entities in one call. More efficient than calling muninn_entity_state repeatedly. Maximum 50 per batch. Partial success supported — check per-item status in results.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"vault": vaultProp,
+					"operations": map[string]any{
+						"type":        "array",
+						"description": "Array of entity state operations (max 50).",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"entity_name": map[string]any{"type": "string", "description": "Entity name to update"},
+								"state":       map[string]any{"type": "string", "description": "New state: active, deprecated, merged, or resolved"},
+								"merged_into": map[string]any{"type": "string", "description": "Canonical entity name (required when state=merged)"},
+								"type":        map[string]any{"type": "string", "description": "Correct the entity type. Omit to preserve existing."},
+							},
+							"required": []string{"entity_name", "state"},
+						},
+					},
+				},
+				"required": []string{"operations"},
 			},
 		},
 		// Hierarchical memory tools

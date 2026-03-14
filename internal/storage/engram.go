@@ -500,11 +500,50 @@ func (ps *PebbleStore) DeleteEngram(ctx context.Context, wsPrefix [8]byte, id UL
 		parentIter.Close()
 	}
 
+	// Entity graph cleanup: remove 0x20 forward links, 0x23 reverse links,
+	// and 0x21 relationship records sourced from this engram.
+	entityNames, err := ps.deleteEntityLinks(wsPrefix, [16]byte(id), batch)
+	if err != nil {
+		slog.Warn("storage: entity link cleanup failed on delete, links may be orphaned", "engram", id.String(), "err", err)
+	}
+
 	if err := batch.Commit(pebble.NoSync); err != nil {
 		return fmt.Errorf("delete engram: %w", err)
 	}
 
 	ps.cache.Delete(wsPrefix, id)
+
+	// Decrement MentionCount on each entity that was linked to this engram.
+	// Done post-commit: if the process crashes here, counts will be slightly
+	// high (stale) but no links remain, so the worst case is an entity
+	// that isn't recognized as orphaned until the next decrement.
+	// DecrementEntityMentionCount automatically deletes the 0x1F record when
+	// the count reaches 0 and the 0x23 reverse index confirms no live links remain.
+	for _, name := range entityNames {
+		if err := ps.DecrementEntityMentionCount(ctx, name); err != nil {
+			slog.Warn("storage: failed to decrement entity mention count on delete", "entity", name, "engram", id.String(), "err", err)
+		}
+	}
+
+	// Decrement co-occurrence counts for every pair of entities that appeared
+	// in this engram. Deletes the 0x24 key when the pair count reaches 0.
+	// Capped at maxCoOccurrenceEntities to bound the O(n²) work on pathological
+	// engrams; entities beyond the cap have stale counts (minor, consistent with
+	// counts being best-effort across restarts).
+	const maxCoOccurrenceEntities = 50
+	coNames := entityNames
+	if len(coNames) > maxCoOccurrenceEntities {
+		slog.Warn("storage: engram has unusually many entities, co-occurrence cleanup capped",
+			"engram", id.String(), "entity_count", len(entityNames), "cap", maxCoOccurrenceEntities)
+		coNames = coNames[:maxCoOccurrenceEntities]
+	}
+	for i := 0; i < len(coNames); i++ {
+		for j := i + 1; j < len(coNames); j++ {
+			if err := ps.DecrementEntityCoOccurrence(ctx, wsPrefix, coNames[i], coNames[j]); err != nil {
+				slog.Warn("storage: failed to decrement co-occurrence on delete", "a", coNames[i], "b", coNames[j], "engram", id.String(), "err", err)
+			}
+		}
+	}
 
 	// Decrement vault count synchronously to avoid a race where callers
 	// observe a stale count after DeleteEngram returns.
@@ -570,6 +609,9 @@ func (ps *PebbleStore) SoftDelete(ctx context.Context, wsPrefix [8]byte, id ULID
 
 	// Update cache (vault-scoped) and invalidate the metadata-only cache
 	// so subsequent GetMetadata calls see the updated StateSoftDeleted state.
+	// Note: entity links (0x20/0x23/0x21) are intentionally preserved on soft
+	// delete so that Restore can return the engram with its entity associations
+	// intact. Entity cleanup only happens on hard delete (DeleteEngram).
 	ps.cache.Set(wsPrefix, id, eng)
 	ps.metaCache.Remove([16]byte(id))
 

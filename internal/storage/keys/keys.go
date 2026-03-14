@@ -587,6 +587,16 @@ func RelationshipPrefix(ws [8]byte) []byte {
 	return key
 }
 
+// RelationshipEngramPrefix returns the 25-byte scan prefix for all relationship
+// records sourced from a specific engram (0x21 | ws(8) | engramID(16)).
+func RelationshipEngramPrefix(ws [8]byte, engramID [16]byte) []byte {
+	key := make([]byte, 1+8+16)
+	key[0] = 0x21
+	copy(key[1:9], ws[:])
+	copy(key[9:25], engramID[:])
+	return key
+}
+
 // CoOccurrenceKey constructs the entity co-occurrence index key (0x24 prefix).
 // Tracks how many times two entities appear in the same engram within a vault.
 // Key: 0x24 | wsPrefix(8) | nameHashA(8) | nameHashB(8) = 25 bytes
@@ -665,6 +675,30 @@ func IdempotencyKey(opID string) []byte {
 	key := make([]byte, 1+8)
 	key[0] = 0x19
 	binary.BigEndian.PutUint64(key[1:], hashVal)
+	return key
+}
+
+// RelEntityIndexKey constructs the relationship entity index key (0x26 prefix).
+// Written for BOTH fromEntity and toEntity on every UpsertRelationshipRecord call.
+// Enables O(engrams-referencing-entity) relationship lookup instead of a full vault scan.
+// Key: 0x26 | ws(8) | entityHash(8) | engramID(16) = 33 bytes
+// Value: empty (all data is encoded in the key).
+func RelEntityIndexKey(ws [8]byte, entityHash [8]byte, engramID [16]byte) []byte {
+	key := make([]byte, 1+8+8+16)
+	key[0] = 0x26
+	copy(key[1:9], ws[:])
+	copy(key[9:17], entityHash[:])
+	copy(key[17:33], engramID[:])
+	return key
+}
+
+// RelEntityIndexPrefix returns the 17-byte prefix for scanning all relationship
+// engrams for a given entity in a vault (0x26 | ws(8) | entityHash(8)).
+func RelEntityIndexPrefix(ws [8]byte, entityHash [8]byte) []byte {
+	key := make([]byte, 1+8+8)
+	key[0] = 0x26
+	copy(key[1:9], ws[:])
+	copy(key[9:17], entityHash[:])
 	return key
 }
 
