@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	muninn "github.com/scrypster/muninndb"
 )
 
 // execOp runs `muninn exec --data-dir <dir> <args...>` and returns stdout,
@@ -137,29 +139,24 @@ func TestExec_UnknownOperation(t *testing.T) {
 func TestExec_AlreadyLocked(t *testing.T) {
 	dir := t.TempDir()
 
-	// Write one engram to initialise the database in this process,
-	// holding the Pebble lock, then try exec in a subprocess — expect exit 2.
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		// Subprocess: try to open the same data dir while we hold the lock.
-		_, stderr, code := execOp(t, dir,
-			"remember", "--concept", "second", "--content", "should fail")
-		if code != execExitError {
-			t.Errorf("locked open: want exit %d, got %d (stderr: %s)", execExitError, code, stderr)
-		}
-	}()
+	// Hold the Pebble lock in THIS process via muninn.Open so the subprocess
+	// is guaranteed to find the lock held for its entire duration.
+	db, err := muninn.Open(dir)
+	if err != nil {
+		t.Fatalf("open holder: %v", err)
+	}
+	defer db.Close()
 
-	// Hold the lock via the integration binary itself (first call creates the DB).
-	execOp(t, dir, "remember", "--concept", "lock holder", "--content", "content")
-
-	// Now run second call; by the time first returns the lock is released so
-	// the race is not deterministic. Instead, verify that when TWO concurrent
-	// exec calls hit the same dir, at least one gets a clean result or a lock
-	// error — no crash or hang.
-	select {
-	case <-done:
-	case <-time.After(15 * time.Second):
-		t.Fatal("second exec call timed out")
+	// Subprocess tries to open the same data dir — must fail with exit 2.
+	_, stderr, code := execOp(t, dir,
+		"remember", "--concept", "test", "--content", "should fail")
+	if code != execExitError {
+		t.Errorf("locked: want exit %d, got %d (stderr: %s)", execExitError, code, stderr)
+	}
+	// Confirm the failure is lock contention, not some unrelated runtime error.
+	if !strings.Contains(stderr, "lock") && !strings.Contains(stderr, "LOCK") &&
+		!strings.Contains(stderr, "held by another process") &&
+		!strings.Contains(stderr, "already in use") {
+		t.Errorf("stderr should mention lock contention, got: %s", stderr)
 	}
 }
