@@ -70,11 +70,11 @@ func (a *mcpEngineAdapter) Evolve(ctx context.Context, vault, oldID, newContent,
 	return &WriteResult{ID: id.String()}, nil
 }
 func (a *mcpEngineAdapter) Consolidate(ctx context.Context, vault string, ids []string, merged string) (*ConsolidateResult, error) {
-	newID, archived, warnings, err := a.eng.Consolidate(ctx, vault, ids, merged)
+	res, err := a.eng.Consolidate(ctx, vault, ids, merged)
 	if err != nil {
 		return nil, err
 	}
-	return &ConsolidateResult{ID: newID.String(), Archived: archived, Warnings: warnings}, nil
+	return &ConsolidateResult{ID: res.MergedID.String(), Archived: res.Archived, Warnings: res.Warnings}, nil
 }
 func (a *mcpEngineAdapter) Session(ctx context.Context, vault string, since time.Time) (*SessionSummary, error) {
 	res, err := a.eng.Session(ctx, vault, since)
@@ -92,11 +92,11 @@ func (a *mcpEngineAdapter) Session(ctx context.Context, vault string, since time
 	return summary, nil
 }
 func (a *mcpEngineAdapter) Decide(ctx context.Context, vault, decision, rationale string, alternatives, evidenceIDs []string) (*WriteResult, error) {
-	id, err := a.eng.Decide(ctx, vault, decision, rationale, alternatives, evidenceIDs)
+	res, err := a.eng.Decide(ctx, vault, decision, rationale, alternatives, evidenceIDs)
 	if err != nil {
 		return nil, err
 	}
-	return &WriteResult{ID: id.String()}, nil
+	return &WriteResult{ID: res.ID.String(), Warnings: res.Warnings}, nil
 }
 
 func (a *mcpEngineAdapter) Restore(ctx context.Context, vault, id string) (*RestoreResult, error) {

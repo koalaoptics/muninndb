@@ -331,23 +331,23 @@ func (w *RESTEngineWrapper) Evolve(ctx context.Context, vault, engramID, newCont
 }
 
 func (w *RESTEngineWrapper) Consolidate(ctx context.Context, vault string, ids []string, mergedContent string) (*ConsolidateResponse, error) {
-	newID, archived, warnings, err := w.engine.Consolidate(ctx, vault, ids, mergedContent)
+	res, err := w.engine.Consolidate(ctx, vault, ids, mergedContent)
 	if err != nil {
 		return nil, err
 	}
 	return &ConsolidateResponse{
-		ID:       newID.String(),
-		Archived: archived,
-		Warnings: warnings,
+		ID:       res.MergedID.String(),
+		Archived: res.Archived,
+		Warnings: res.Warnings,
 	}, nil
 }
 
 func (w *RESTEngineWrapper) Decide(ctx context.Context, vault, decision, rationale string, alternatives, evidenceIDs []string) (*DecideResponse, error) {
-	newID, err := w.engine.Decide(ctx, vault, decision, rationale, alternatives, evidenceIDs)
+	res, err := w.engine.Decide(ctx, vault, decision, rationale, alternatives, evidenceIDs)
 	if err != nil {
 		return nil, err
 	}
-	return &DecideResponse{ID: newID.String()}, nil
+	return &DecideResponse{ID: res.ID.String(), Warnings: res.Warnings}, nil
 }
 
 func (w *RESTEngineWrapper) Restore(ctx context.Context, vault, engramID string) (*RestoreResponse, error) {
