@@ -773,6 +773,99 @@ func TestPublicVaultFullMutatingUnaryRPCsAllowed(t *testing.T) {
 	}
 }
 
+func TestObserveKeyMutatingUnaryRPCsDenied(t *testing.T) {
+	store := newTestAuthStore(t)
+	token, _, err := store.GenerateAPIKey("default", "observer", auth.ModeObserve, nil)
+	if err != nil {
+		t.Fatalf("GenerateAPIKey: %v", err)
+	}
+
+	writeCalled := false
+	batchWriteCalled := false
+	linkCalled := false
+	forgetCalled := false
+	srv := transportgrpc.NewServer(":0", &mockEngine{
+		writeFn: func(ctx context.Context, req *pb.WriteRequest) (*pb.WriteResponse, error) {
+			writeCalled = true
+			return &pb.WriteResponse{ID: "engram-123"}, nil
+		},
+		batchWriteFn: func(ctx context.Context, req *pb.BatchWriteRequest) (*pb.BatchWriteResponse, error) {
+			batchWriteCalled = true
+			return &pb.BatchWriteResponse{}, nil
+		},
+		linkFn: func(ctx context.Context, req *pb.LinkRequest) (*pb.LinkResponse, error) {
+			linkCalled = true
+			return &pb.LinkResponse{OK: true}, nil
+		},
+		forgetFn: func(ctx context.Context, req *pb.ForgetRequest) (*pb.ForgetResponse, error) {
+			forgetCalled = true
+			return &pb.ForgetResponse{OK: true}, nil
+		},
+	}, store, nil)
+
+	cases := []struct {
+		name   string
+		req    any
+		invoke func(context.Context, any) (any, error)
+		called *bool
+	}{
+		{
+			name:   "Write",
+			req:    &pb.WriteRequest{Vault: "default", Concept: "test", Content: "hello"},
+			invoke: func(ctx context.Context, req any) (any, error) { return srv.Write(ctx, req.(*pb.WriteRequest)) },
+			called: &writeCalled,
+		},
+		{
+			name: "BatchWrite",
+			req:  &pb.BatchWriteRequest{Requests: []*pb.WriteRequest{{Vault: "default", Concept: "a", Content: "x"}}},
+			invoke: func(ctx context.Context, req any) (any, error) {
+				return srv.BatchWrite(ctx, req.(*pb.BatchWriteRequest))
+			},
+			called: &batchWriteCalled,
+		},
+		{
+			name:   "Link",
+			req:    &pb.LinkRequest{Vault: "default", SourceID: "id1", TargetID: "id2", RelType: 1},
+			invoke: func(ctx context.Context, req any) (any, error) { return srv.Link(ctx, req.(*pb.LinkRequest)) },
+			called: &linkCalled,
+		},
+		{
+			name:   "Forget",
+			req:    &pb.ForgetRequest{Vault: "default", ID: "id1"},
+			invoke: func(ctx context.Context, req any) (any, error) { return srv.Forget(ctx, req.(*pb.ForgetRequest)) },
+			called: &forgetCalled,
+		},
+	}
+
+	md := metadata.Pairs("x-api-key", token)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			*tc.called = false
+			ctx := metadata.NewIncomingContext(context.Background(), md)
+			_, err := srv.TestableAuthUnaryInterceptor(ctx, tc.req, nil, func(ctx context.Context, req any) (any, error) {
+				return tc.invoke(ctx, req)
+			})
+			if err == nil {
+				t.Fatal("expected permission error, got nil")
+			}
+			st, ok := status.FromError(err)
+			if !ok {
+				t.Fatalf("error is not a gRPC status: %v", err)
+			}
+			if st.Code() != codes.PermissionDenied {
+				t.Fatalf("code = %v, want PermissionDenied", st.Code())
+			}
+			if st.Message() != "read-only key cannot write" {
+				t.Fatalf("message = %q, want %q", st.Message(), "read-only key cannot write")
+			}
+			if *tc.called {
+				t.Fatal("engine method should not be called for observe-mode access")
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // RPC handler tests — Unary RPCs
 // ---------------------------------------------------------------------------

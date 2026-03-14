@@ -169,12 +169,11 @@ func WriteOnlyGuard(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ReadOnlyFromContext returns true for API key modes that must not call
-// semantically mutating REST endpoints. Route registration decides which
-// endpoints are mutating; do not infer this from HTTP verb alone.
+// ReadOnlyFromContext returns true for request modes that must not call
+// semantically mutating operations. Transport wiring decides which endpoints
+// or RPCs are mutating; do not infer this from HTTP verb alone.
 func ReadOnlyFromContext(ctx context.Context) bool {
-	mode, _ := ctx.Value(ContextMode).(string)
-	return mode == ModeObserve
+	return ObserveFromContext(ctx)
 }
 
 // ReadOnlyGuard is HTTP middleware that returns 403 for read-only mode
