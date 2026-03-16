@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/cockroachdb/pebble"
 	"github.com/scrypster/muninndb/internal/metrics"
 	"github.com/scrypster/muninndb/internal/storage"
 	"github.com/scrypster/muninndb/internal/storage/keys"
@@ -59,32 +58,14 @@ func (e *Engine) ReindexFTSVault(ctx context.Context, vaultName string) (int64, 
 	// Step 1: Delete existing FTS keys for this vault via range tombstones.
 	// Prefixes cleared: 0x05 (posting lists), 0x06 (trigrams),
 	//                   0x08 (FTS global stats), 0x09 (per-term stats).
-	db := e.store.GetDB()
-
 	wsPlus, err := keys.IncrementWSPrefix(ws)
 	if err != nil {
 		return 0, fmt.Errorf("reindex-fts: increment ws: %w", err)
 	}
 
-	ftsPrefixes := []byte{0x05, 0x06, 0x08, 0x09}
-	batch := db.NewBatch()
-	for _, p := range ftsPrefixes {
-		lo := make([]byte, 9)
-		lo[0] = p
-		copy(lo[1:], ws[:])
-		hi := make([]byte, 9)
-		hi[0] = p
-		copy(hi[1:], wsPlus[:])
-		if err := batch.DeleteRange(lo, hi, nil); err != nil {
-			batch.Close()
-			return 0, fmt.Errorf("reindex-fts: delete range 0x%02X: %w", p, err)
-		}
+	if err := e.store.ClearFTSKeys(ws, wsPlus); err != nil {
+		return 0, fmt.Errorf("reindex-fts: clear keys: %w", err)
 	}
-	if err := batch.Commit(pebble.Sync); err != nil {
-		batch.Close()
-		return 0, fmt.Errorf("reindex-fts: commit clear batch: %w", err)
-	}
-	batch.Close()
 
 	// Invalidate in-memory IDF cache so stale scores are not carried forward.
 	if e.fts != nil {
@@ -108,8 +89,7 @@ func (e *Engine) ReindexFTSVault(ctx context.Context, vaultName string) (int64, 
 	}
 
 	// Step 3: Set the FTS version marker to 1 (fully re-indexed with stemming).
-	versionKey := keys.FTSVersionKey(ws)
-	if err := db.Set(versionKey, []byte{0x01}, pebble.Sync); err != nil {
+	if err := e.store.SetFTSVersionMarker(ws, 0x01); err != nil {
 		return indexed, fmt.Errorf("reindex-fts: set version marker: %w", err)
 	}
 
