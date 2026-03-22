@@ -525,14 +525,16 @@ func (s *Server) withAdminMiddleware(handler http.HandlerFunc) http.HandlerFunc 
 	return s.withPublicMiddleware(s.bodySizeMiddleware(s.authStore.AdminAPIMiddleware(s.sessionSecret, handler)))
 }
 
-// withAdminMiddlewareNoSizeLimit is like withAdminMiddleware but omits the
-// default 4 MB body cap. Use this for routes that apply their own body limit
-// (e.g. withLargeBody) so the two MaxBytesReader wrappers don't compound.
+// withAdminMiddlewareNoSizeLimit is like withAdminMiddleware but omits all body
+// size limits (both the 64 KB publicBodySizeMiddleware in withPublicMiddleware
+// and the 4 MB bodySizeMiddleware). Use this for routes that apply their own
+// limit (e.g. withLargeBody) so multiple MaxBytesReader wrappers don't compound.
 func (s *Server) withAdminMiddlewareNoSizeLimit(handler http.HandlerFunc) http.HandlerFunc {
 	if s.authStore == nil || len(s.sessionSecret) == 0 {
-		return s.withPublicMiddleware(handler)
+		return s.recoveryMiddleware(s.requestIDMiddleware(s.loggingMiddleware(handler)))
 	}
-	return s.withPublicMiddleware(s.authStore.AdminAPIMiddleware(s.sessionSecret, handler))
+	return s.recoveryMiddleware(s.requestIDMiddleware(s.loggingMiddleware(
+		s.authStore.AdminAPIMiddleware(s.sessionSecret, handler))))
 }
 
 // bodySizeMiddleware limits request bodies to 4 MB to prevent resource exhaustion.
