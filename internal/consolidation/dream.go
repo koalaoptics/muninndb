@@ -28,6 +28,9 @@ func (w *Worker) DreamOnce(ctx context.Context, opts DreamOpts) (*DreamReport, e
 	start := time.Now()
 	dreport := &DreamReport{}
 
+	// TODO: enforce trigger gates (time >= 12h + volume >= 3 engrams) when Force is false.
+	// ReadDreamState/WriteDreamState are implemented but gate logic is deferred to PR #2.
+
 	// Resolve which vaults to process.
 	var vaults []string
 	if opts.Scope != "" {
@@ -81,13 +84,9 @@ func (w *Worker) DreamOnce(ctx context.Context, opts DreamOpts) (*DreamReport, e
 
 		// Skip legal vaults entirely.
 		if summary != nil && summary.IsLegal {
-			legalCount := 0
-			if summary != nil {
-				legalCount = summary.EngramCount
-			}
-			report.LegalSkipped = legalCount
+			report.LegalSkipped = summary.EngramCount
 			slog.Info("dream: skipping legal vault (protected)",
-				"vault", vault, "engrams", legalCount)
+				"vault", vault, "engrams", summary.EngramCount)
 			dreport.Skipped = append(dreport.Skipped, vault)
 			report.Duration = time.Since(report.StartedAt)
 			dreport.Reports = append(dreport.Reports, report)

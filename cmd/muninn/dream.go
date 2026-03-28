@@ -82,10 +82,6 @@ func printDreamReport(report *muninn.DreamReport, dryRun bool) {
 	fmt.Printf("Dream completed in %s\n", report.TotalDuration.Round(100*time.Millisecond))
 	fmt.Println()
 
-	if len(report.Skipped) > 0 {
-		fmt.Printf("Skipped (legal): %s\n", strings.Join(report.Skipped, ", "))
-	}
-
 	for _, r := range report.Reports {
 		if r.Orient != nil && r.Orient.IsLegal {
 			fmt.Printf("  %-16s  %d engrams (protected, skipped)\n", r.Vault, r.LegalSkipped)
@@ -97,7 +93,7 @@ func printDreamReport(report *muninn.DreamReport, dryRun bool) {
 			scanned = r.Orient.EngramCount
 		}
 
-		fmt.Printf("  %-16s  scanned %d", r.Vault, scanned)
+		fmt.Printf("  %-16s  scanned %d engrams", r.Vault, scanned)
 		var changes []string
 		if r.MergedEngrams > 0 {
 			changes = append(changes, fmt.Sprintf("merged %d", r.MergedEngrams))
@@ -109,6 +105,10 @@ func printDreamReport(report *muninn.DreamReport, dryRun bool) {
 			fmt.Printf("  (%s)", strings.Join(changes, ", "))
 		}
 		fmt.Println()
+	}
+
+	if len(report.Skipped) > 0 {
+		fmt.Printf("\nSkipped (legal): %s\n", strings.Join(report.Skipped, ", "))
 	}
 }
 
