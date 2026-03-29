@@ -15,6 +15,8 @@ type DreamOpts struct {
 }
 
 // DreamReport is the result of a dream consolidation pass.
+// NOTE: This is a type alias that exposes internal consolidation types.
+// Consider wrapping before API stabilization.
 type DreamReport = consolidation.DreamReport
 
 // Dream runs a dream consolidation pass across vaults.

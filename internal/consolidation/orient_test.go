@@ -76,9 +76,16 @@ func TestIsLegalVault(t *testing.T) {
 	}{
 		{"legal", true},
 		{"Legal", true},
-		{"legal-docs", true},
-		{"my_legal", true},
 		{"LEGAL", true},
+		{"legal:contracts", true},
+		{"legal/docs", true},
+		{"Legal:NDA", true},
+		// These should NOT match anymore:
+		{"legal-docs", false},
+		{"my_legal", false},
+		{"paralegal", false},
+		{"illegal", false},
+		// Normal vaults:
 		{"work", false},
 		{"default", false},
 		{"personal", false},

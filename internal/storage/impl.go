@@ -555,7 +555,7 @@ func (ps *PebbleStore) WriteDreamState(vaultPrefix [8]byte, lastDreamAt time.Tim
 	buf := make([]byte, 16)
 	binary.BigEndian.PutUint64(buf[0:8], uint64(lastDreamAt.UnixNano()))
 	binary.BigEndian.PutUint64(buf[8:16], uint64(engramsAtDream))
-	return ps.db.Set(keys.DreamStateKey(vaultPrefix), buf, pebble.NoSync)
+	return ps.db.Set(keys.DreamStateKey(vaultPrefix), buf, pebble.Sync)
 }
 
 // ReadDreamState loads per-vault dream state from Pebble.

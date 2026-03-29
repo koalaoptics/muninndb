@@ -51,15 +51,17 @@ func (w *Worker) DreamOnce(ctx context.Context, opts DreamOpts) (*DreamReport, e
 
 	store := w.Engine.Store()
 
-	// Save original settings and set dream-mode config.
-	origDryRun := w.DryRun
-	origThreshold := w.DedupThreshold
-	w.DryRun = opts.DryRun
-	w.DedupThreshold = 0.85
-	defer func() {
-		w.DryRun = origDryRun
-		w.DedupThreshold = origThreshold
-	}()
+	// Construct a dream-specific worker to avoid mutating the caller's instance.
+	// This prevents data races if DreamOnce is called while the background
+	// consolidation scheduler is running on the same Worker.
+	dw := &Worker{
+		Engine:         w.Engine,
+		Schedule:       w.Schedule,
+		MaxDedup:       w.MaxDedup,
+		MaxTransitive:  w.MaxTransitive,
+		DryRun:         opts.DryRun,
+		DedupThreshold: 0.85,
+	}
 
 	for _, vault := range vaults {
 		if err := ctx.Err(); err != nil {
@@ -75,7 +77,7 @@ func (w *Worker) DreamOnce(ctx context.Context, opts DreamOpts) (*DreamReport, e
 		}
 
 		// Phase 0: Orient
-		summary, err := w.runPhase0Orient(ctx, store, wsPrefix, vault)
+		summary, err := dw.runPhase0Orient(ctx, store, wsPrefix, vault)
 		if err != nil {
 			slog.Warn("dream: phase 0 (orient) failed", "vault", vault, "error", err)
 			report.Errors = append(report.Errors, "phase0_orient: "+err.Error())
@@ -94,13 +96,13 @@ func (w *Worker) DreamOnce(ctx context.Context, opts DreamOpts) (*DreamReport, e
 		}
 
 		// Phase 1: Activation Replay
-		if err := w.runPhase1Replay(ctx, store, wsPrefix, report); err != nil {
+		if err := dw.runPhase1Replay(ctx, store, wsPrefix, report); err != nil {
 			slog.Warn("dream: phase 1 (replay) failed", "vault", vault, "error", err)
 			report.Errors = append(report.Errors, "phase1_replay: "+err.Error())
 		}
 
 		// Phase 2: Semantic Deduplication (threshold 0.85 in dream mode)
-		if err := w.runPhase2Dedup(ctx, store, wsPrefix, report, vault); err != nil {
+		if err := dw.runPhase2Dedup(ctx, store, wsPrefix, report, vault); err != nil {
 			slog.Warn("dream: phase 2 (dedup) failed", "vault", vault, "error", err)
 			report.Errors = append(report.Errors, "phase2_dedup: "+err.Error())
 		}
