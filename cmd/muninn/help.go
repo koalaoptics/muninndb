@@ -123,7 +123,7 @@ var subcommandHelp = map[string]func(){
 	"dream": func() {
 		printSubcommandUsage("dream", "LLM-driven memory consolidation", "muninn dream [flags]",
 			[][2]string{
-				{"--force", "Bypass trigger gates (time + volume)"},
+				{"--force", "Bypass trigger gates (not yet implemented)"},
 				{"--dry-run", "Preview changes without writing"},
 				{"--scope <vault>", "Limit to a single vault"},
 				{"--data-dir <dir>", "Data directory (default: ~/.muninn/data)"},
