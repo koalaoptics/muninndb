@@ -448,7 +448,7 @@
         <input id="memory-search-input" data-testid="input-search" class="input-field" placeholder="Search memories… (semantic, try natural language)" x-model="searchQuery"
           @keydown.enter="searchMemories()" style="flex:1;min-width:200px;" />
         <!-- Recall mode segmented control (Item 3: tooltips) -->
-        <div style="display:inline-flex;border:1px solid var(--border);border-radius:0.5rem;overflow:hidden;font-size:0.75rem;">
+        <div style="display:inline-flex;border:1px solid var(--border);border-radius:0.5rem;overflow:hidden;">
           <button @click="searchMode = 'balanced'"
             :style="'padding:0.5rem 1rem;border:none;border-right:1px solid var(--border);cursor:pointer;transition:all 0.15s;font-weight:600;' + (searchMode === 'balanced' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);')"
             title="Blend keyword + semantic search with temporal decay (default)">Balanced</button>
