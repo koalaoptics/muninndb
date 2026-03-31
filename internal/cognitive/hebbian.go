@@ -45,6 +45,10 @@ type CoActivationEvent struct {
 	WS      [8]byte
 	At      time.Time
 	Engrams []CoActivatedEngram
+	// LTP is the per-vault LTP configuration resolved from the vault's plasticity config.
+	// When nil, LTP is disabled for this event. This allows per-vault LTP settings
+	// even though the HebbianWorker is shared across all vaults.
+	LTP *LTPConfig
 }
 
 // CoActivatedEngram is one engram in a co-activation event.
@@ -165,9 +169,10 @@ func (hw *HebbianWorker) Run(ctx context.Context) {
 }
 
 // IsPotentiated returns true if the given association pair is LTP-potentiated
-// for the specified workspace. Returns false if LTP is disabled.
+// for the specified workspace. Returns false if LTP state is unavailable.
+// Potentiation can occur via worker-level LTP config or per-event LTP config.
 func (hw *HebbianWorker) IsPotentiated(ws [8]byte, pair pairKey) bool {
-	if hw.ltpCfg == nil || hw.ltpState == nil {
+	if hw.ltpState == nil {
 		return false
 	}
 	return hw.ltpState.isPotentiated(ws, pair)
@@ -198,6 +203,7 @@ func (hw *HebbianWorker) processBatch(ctx context.Context, batch []CoActivationE
 		count  int
 		signal float64
 		ws     [8]byte
+		ltp    *LTPConfig // per-vault LTP config from the event (nil = use worker default)
 	}
 	pairs := make(map[pairKey]*pairStats)
 
@@ -210,7 +216,7 @@ func (hw *HebbianWorker) processBatch(ctx context.Context, batch []CoActivationE
 					ps.count++
 					ps.signal += signal
 				} else {
-					pairs[key] = &pairStats{count: 1, signal: signal, ws: event.WS}
+					pairs[key] = &pairStats{count: 1, signal: signal, ws: event.WS, ltp: event.LTP}
 				}
 			}
 		}
@@ -260,11 +266,17 @@ func (hw *HebbianWorker) processBatch(ctx context.Context, batch []CoActivationE
 		}
 
 		// LTP: track co-activation count and enforce weight floor for potentiated pairs.
-		if hw.ltpCfg != nil && hw.ltpCfg.Threshold > 0 {
-			hw.ltpState.addCount(stats.ws, pair, countDelta, hw.ltpCfg.Threshold)
-			if hw.ltpState.isPotentiated(stats.ws, pair) && hw.ltpCfg.WeightFloor > 0 {
-				if newWeight < hw.ltpCfg.WeightFloor {
-					newWeight = hw.ltpCfg.WeightFloor
+		// Event-level LTP config (from vault plasticity) takes precedence; fall back
+		// to worker-level config for backward compatibility with direct construction.
+		ltpCfg := stats.ltp
+		if ltpCfg == nil {
+			ltpCfg = hw.ltpCfg
+		}
+		if ltpCfg != nil && ltpCfg.Threshold > 0 {
+			hw.ltpState.addCount(stats.ws, pair, countDelta, ltpCfg.Threshold)
+			if hw.ltpState.isPotentiated(stats.ws, pair) && ltpCfg.WeightFloor > 0 {
+				if newWeight < ltpCfg.WeightFloor {
+					newWeight = ltpCfg.WeightFloor
 				}
 			}
 		}

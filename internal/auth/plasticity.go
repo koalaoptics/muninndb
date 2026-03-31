@@ -52,17 +52,17 @@ type PlasticityConfig struct {
 	// nil = use "balanced" (engine defaults).
 	RecallMode *string `json:"recall_mode,omitempty"`
 
-// ScoringFusion selects the Phase 6 scoring strategy.
+	// ScoringFusion selects the Phase 6 scoring strategy.
 	// "rrf" = use Phase 3 RRF scores directly (rank-based, scale-invariant).
 	// "weighted_sum" = use legacy weighted-sum scoring (DisableACTR implied).
 	// nil/empty = default (ACT-R scoring, unchanged behavior).
 	ScoringFusion *string `json:"scoring_fusion,omitempty"`
-// Long-Term Potentiation (LTP) for Hebbian associations.
-	// Associations co-activated beyond LTPThreshold become potentiated:
-	// decay resistance and a higher weight floor.
+
+	// Long-Term Potentiation (LTP) for Hebbian associations.
+	// Associations co-activated beyond LTPThreshold become potentiated,
+	// enforcing a higher weight floor that resists decay.
 	// All zero/nil = disabled (backward compatible).
 	LTPThreshold   *int     `json:"ltp_threshold,omitempty"`    // co-activation count to trigger LTP (0 = disabled)
-	LTPDecayFactor *float64 `json:"ltp_decay_factor,omitempty"` // decay multiplier for potentiated edges (0–1; 0 = disabled)
 	LTPWeightFloor *float32 `json:"ltp_weight_floor,omitempty"` // minimum weight for potentiated edges (0–1; 0 = disabled)
 }
 
@@ -108,13 +108,11 @@ type ResolvedPlasticity struct {
 	EnrichmentEnabled bool `json:"enrichment_enabled"`
 	// RecallMode is the default recall mode for this vault.
 	RecallMode string `json:"recall_mode"`
-// ScoringFusion selects Phase 6 scoring strategy: "" (default=ACT-R), "rrf", or "weighted_sum".
+	// ScoringFusion selects Phase 6 scoring strategy: "" (default=ACT-R), "rrf", or "weighted_sum".
 	ScoringFusion string `json:"scoring_fusion"`
-// Long-Term Potentiation (LTP) for Hebbian associations.
-	// Zero values = disabled (backward compatible default).
-	LTPThreshold   int     `json:"ltp_threshold"`    // co-activation count to trigger LTP; 0 = disabled
-	LTPDecayFactor float64 `json:"ltp_decay_factor"` // decay multiplier for potentiated edges; 0 = disabled
-	LTPWeightFloor float32 `json:"ltp_weight_floor"` // minimum weight for potentiated edges; 0 = disabled
+	// LTP (Long-Term Potentiation) resolved values. Zero = disabled.
+	LTPThreshold   int     `json:"ltp_threshold"`
+	LTPWeightFloor float32 `json:"ltp_weight_floor"`
 }
 
 type plasticityPreset struct {
@@ -143,9 +141,8 @@ type plasticityPreset struct {
 	InlineEnrichment  string
 	EnrichmentEnabled bool
 	RecallMode        string
-ScoringFusion     string // "" = default (ACT-R), "rrf", "weighted_sum"
-LTPThreshold      int
-	LTPDecayFactor    float64
+	ScoringFusion     string // "" = default (ACT-R), "rrf", "weighted_sum"
+	LTPThreshold      int
 	LTPWeightFloor    float32
 }
 
@@ -298,9 +295,8 @@ func ResolvePlasticity(cfg *PlasticityConfig) ResolvedPlasticity {
 		InlineEnrichment:     p.InlineEnrichment,
 		EnrichmentEnabled:    p.EnrichmentEnabled,
 		RecallMode:           p.RecallMode,
-ScoringFusion:        p.ScoringFusion,
-LTPThreshold:         p.LTPThreshold,
-		LTPDecayFactor:       p.LTPDecayFactor,
+		ScoringFusion:        p.ScoringFusion,
+		LTPThreshold:         p.LTPThreshold,
 		LTPWeightFloor:       p.LTPWeightFloor,
 	}
 
@@ -458,14 +454,14 @@ LTPThreshold:         p.LTPThreshold,
 	if cfg.RecallMode != nil && ValidRecallMode(*cfg.RecallMode) {
 		r.RecallMode = *cfg.RecallMode
 	}
-if cfg.ScoringFusion != nil {
+	if cfg.ScoringFusion != nil {
 		if ValidScoringFusion(*cfg.ScoringFusion) {
 			r.ScoringFusion = *cfg.ScoringFusion
 		} else {
 			r.ScoringFusion = "" // invalid → default (ACT-R)
 		}
 	}
-// LTP overrides
+	// LTP overrides
 	if cfg.LTPThreshold != nil {
 		v := *cfg.LTPThreshold
 		if v < 0 {
@@ -473,18 +469,8 @@ if cfg.ScoringFusion != nil {
 		}
 		r.LTPThreshold = v
 	}
-	if cfg.LTPDecayFactor != nil {
-		v := *cfg.LTPDecayFactor
-		if v < 0 {
-			v = 0
-		}
-		if v > 1 {
-			v = 1
-		}
-		r.LTPDecayFactor = v
-	}
 	if cfg.LTPWeightFloor != nil {
-		v := *cfg.LTPWeightFloor
+		v := float32(*cfg.LTPWeightFloor)
 		if v < 0 {
 			v = 0
 		}

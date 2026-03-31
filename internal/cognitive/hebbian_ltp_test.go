@@ -77,7 +77,6 @@ func TestLTP_CoActivationCounterIncrements(t *testing.T) {
 
 	ltpCfg := &LTPConfig{
 		Threshold:   5,
-		DecayFactor: 0.5,
 		WeightFloor: 0.3,
 	}
 	hw := NewHebbianWorkerWithLTP(store, nil, nil, ltpCfg)
@@ -119,7 +118,6 @@ func TestLTP_PotentiationAfterThreshold(t *testing.T) {
 
 	ltpCfg := &LTPConfig{
 		Threshold:   3,    // low threshold for testing
-		DecayFactor: 0.5,  // not tested here
 		WeightFloor: 0.3,  // should be enforced once potentiated
 	}
 	hw := NewHebbianWorkerWithLTP(store, nil, nil, ltpCfg)
@@ -159,7 +157,6 @@ func TestLTP_PotentiatedWeightFloor(t *testing.T) {
 
 	ltpCfg := &LTPConfig{
 		Threshold:   2,    // low threshold
-		DecayFactor: 0.5,
 		WeightFloor: 0.3,  // weight floor for potentiated associations
 	}
 	hw := NewHebbianWorkerWithLTP(store, nil, nil, ltpCfg)
@@ -210,7 +207,6 @@ func TestLTP_CounterPersistsAcrossPasses(t *testing.T) {
 
 	ltpCfg := &LTPConfig{
 		Threshold:   10,   // high threshold so we can observe accumulation
-		DecayFactor: 0.5,
 		WeightFloor: 0.3,
 	}
 	hw := NewHebbianWorkerWithLTP(store, nil, nil, ltpCfg)
@@ -340,5 +336,120 @@ func TestLTP_OldConstructorUnchanged(t *testing.T) {
 
 	if weight <= 0 {
 		t.Error("expected positive weight from old NewHebbianWorker constructor")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test (g): Event-level LTP config wires potentiation through a plain worker
+// ---------------------------------------------------------------------------
+// This integration test verifies the full wiring path: a HebbianWorker created
+// WITHOUT worker-level LTP config receives events WITH per-vault LTP config
+// (as would happen when the engine builds LTP config from ResolvedPlasticity).
+
+func TestLTP_EventLevelConfig_Integration(t *testing.T) {
+	store := newLTPMockStore()
+
+	// Create worker with NO worker-level LTP config (like server.go does).
+	hw := NewHebbianWorker(store)
+
+	idA := [16]byte{0xA6}
+	idB := [16]byte{0xB6}
+	ws := [8]byte{0, 0, 0, 7}
+
+	// Seed a low weight so we can verify the floor is enforced.
+	store.mu.Lock()
+	store.weights[pairKeyBytes(idA, idB)] = 0.02
+	store.mu.Unlock()
+
+	// Event-level LTP config (as the engine would build from resolved plasticity).
+	eventLTP := &LTPConfig{
+		Threshold:   3,
+		WeightFloor: 0.25,
+	}
+
+	// Submit enough events (with event-level LTP) to exceed threshold.
+	for i := 0; i < 5; i++ {
+		hw.Submit(CoActivationEvent{
+			WS: ws,
+			At: time.Now(),
+			Engrams: []CoActivatedEngram{
+				{ID: idA, Score: 0.1}, // low scores to keep Hebbian delta small
+				{ID: idB, Score: 0.1},
+			},
+			LTP: eventLTP,
+		})
+	}
+
+	hw.Stop()
+
+	// Verify potentiation occurred via event-level config.
+	pair := canonicalPair(idA, idB)
+	if !hw.IsPotentiated(ws, pair) {
+		t.Fatal("expected association to be potentiated via event-level LTP config")
+	}
+
+	// Verify weight floor is enforced.
+	weightAB := store.getWeight(idA, idB)
+	weightBA := store.getWeight(idB, idA)
+	weight := weightAB
+	if weightBA > weight {
+		weight = weightBA
+	}
+
+	if weight < eventLTP.WeightFloor {
+		t.Errorf("potentiated weight %v is below event-level LTP floor %v",
+			weight, eventLTP.WeightFloor)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test (h): Event-level LTP config is per-vault (different vaults, different configs)
+// ---------------------------------------------------------------------------
+
+func TestLTP_EventLevelConfig_PerVault(t *testing.T) {
+	store := newLTPMockStore()
+	hw := NewHebbianWorker(store)
+
+	idA := [16]byte{0xA7}
+	idB := [16]byte{0xB7}
+	wsVault1 := [8]byte{0, 0, 0, 8}
+	wsVault2 := [8]byte{0, 0, 0, 9}
+
+	// Vault 1: LTP enabled with threshold 2
+	ltp1 := &LTPConfig{Threshold: 2, WeightFloor: 0.3}
+	// Vault 2: LTP disabled (nil)
+
+	// Submit 3 events for vault 1 (exceeds threshold of 2)
+	for i := 0; i < 3; i++ {
+		hw.Submit(CoActivationEvent{
+			WS:      wsVault1,
+			At:      time.Now(),
+			Engrams: []CoActivatedEngram{{ID: idA, Score: 0.9}, {ID: idB, Score: 0.9}},
+			LTP:     ltp1,
+		})
+	}
+
+	// Submit 3 events for vault 2 (no LTP)
+	for i := 0; i < 3; i++ {
+		hw.Submit(CoActivationEvent{
+			WS:      wsVault2,
+			At:      time.Now(),
+			Engrams: []CoActivatedEngram{{ID: idA, Score: 0.9}, {ID: idB, Score: 0.9}},
+			LTP:     nil,
+		})
+	}
+
+	hw.Stop()
+
+	pair := canonicalPair(idA, idB)
+
+	// Vault 1 should be potentiated
+	if !hw.IsPotentiated(wsVault1, pair) {
+		t.Error("vault 1: expected association to be potentiated")
+	}
+
+	// Vault 2 should NOT be potentiated (no LTP config)
+	if hw.IsPotentiated(wsVault2, pair) {
+		t.Error("vault 2: expected association NOT to be potentiated (LTP disabled)")
 	}
 }

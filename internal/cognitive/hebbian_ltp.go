@@ -4,14 +4,14 @@ import "sync"
 
 // LTPConfig configures Long-Term Potentiation behavior for the Hebbian worker.
 // When nil, LTP is disabled and all behavior is unchanged (backward compatible).
+//
+// Current scope: weight floor enforcement for potentiated associations.
+// Decay resistance (reduced decay rate for potentiated edges) is planned for a
+// follow-up change that integrates with the association decay system.
 type LTPConfig struct {
 	// Threshold is the co-activation count at which an association becomes potentiated.
 	// 0 = disabled.
 	Threshold int
-	// DecayFactor is the reduced decay multiplier for potentiated associations.
-	// E.g., 0.5 means potentiated edges decay at half the normal rate.
-	// 0 = disabled (no decay reduction).
-	DecayFactor float64
 	// WeightFloor is the minimum weight for potentiated associations.
 	// The Hebbian worker enforces this floor during weight updates.
 	// 0 = disabled (no floor enforcement).
@@ -21,6 +21,12 @@ type LTPConfig struct {
 // ltpState tracks per-workspace per-pair potentiation status in memory.
 // The authoritative co-activation count is in the storage layer (CoActivationCount);
 // this is a session-local cache for fast lookups during processBatch.
+//
+// Important: ltpState is session-scoped and NOT hydrated from storage on restart.
+// A process restart resets all potentiation status. Associations must be
+// re-observed (co-activated again) to regain potentiated status. This is
+// acceptable because LTP is a performance optimization (weight floor), not a
+// correctness requirement — the underlying association weights are persisted.
 type ltpState struct {
 	mu          sync.RWMutex
 	potentiated map[ltpKey]struct{} // set of potentiated pairs
