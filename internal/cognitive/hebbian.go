@@ -80,6 +80,11 @@ type HebbianWorker struct {
 	// Must not block — the trigger system drops events if its channel is full.
 	OnWeightUpdate func(ws [8]byte, id [16]byte, field string, oldVal, newVal float64)
 
+	// LTP (Long-Term Potentiation) configuration and state.
+	// When ltpCfg is nil, LTP is disabled and behavior is unchanged.
+	ltpCfg   *LTPConfig
+	ltpState *ltpState
+
 	// internal stop channel for tests and lifecycle management.
 	stopCh chan struct{}
 	doneCh chan struct{}
@@ -109,10 +114,18 @@ func NewHebbianWorker(store HebbianStore) *HebbianWorker {
 //
 //	hw := NewHebbianWorkerWithDB(store, db, myCallback)  // safe: set before goroutine starts
 func NewHebbianWorkerWithDB(store HebbianStore, db *pebble.DB, onWeightUpdate func(ws [8]byte, id [16]byte, field string, oldVal, newVal float64)) *HebbianWorker {
+	return NewHebbianWorkerWithLTP(store, db, onWeightUpdate, nil)
+}
+
+// NewHebbianWorkerWithLTP creates a new Hebbian worker with optional LTP configuration.
+// When ltpCfg is nil, LTP is disabled and behavior is identical to NewHebbianWorkerWithDB.
+func NewHebbianWorkerWithLTP(store HebbianStore, db *pebble.DB, onWeightUpdate func(ws [8]byte, id [16]byte, field string, oldVal, newVal float64), ltpCfg *LTPConfig) *HebbianWorker {
 	hw := &HebbianWorker{
 		store:          store,
 		db:             db,
 		OnWeightUpdate: onWeightUpdate, // set BEFORE the background goroutine starts
+		ltpCfg:         ltpCfg,
+		ltpState:       newLTPState(),
 		stopCh:         make(chan struct{}),
 		doneCh:         make(chan struct{}),
 	}
@@ -149,6 +162,15 @@ func (hw *HebbianWorker) Run(ctx context.Context) {
 		// Worker already stopped externally (e.g., hw.Stop() called directly).
 	}
 	<-hw.doneCh
+}
+
+// IsPotentiated returns true if the given association pair is LTP-potentiated
+// for the specified workspace. Returns false if LTP is disabled.
+func (hw *HebbianWorker) IsPotentiated(ws [8]byte, pair pairKey) bool {
+	if hw.ltpCfg == nil || hw.ltpState == nil {
+		return false
+	}
+	return hw.ltpState.isPotentiated(ws, pair)
 }
 
 // Stop signals the HebbianWorker to flush pending work and shut down.
@@ -235,6 +257,16 @@ func (hw *HebbianWorker) processBatch(ctx context.Context, batch []CoActivationE
 			countDelta = math.MaxUint32
 		} else {
 			countDelta = uint32(stats.count)
+		}
+
+		// LTP: track co-activation count and enforce weight floor for potentiated pairs.
+		if hw.ltpCfg != nil && hw.ltpCfg.Threshold > 0 {
+			hw.ltpState.addCount(stats.ws, pair, countDelta, hw.ltpCfg.Threshold)
+			if hw.ltpState.isPotentiated(stats.ws, pair) && hw.ltpCfg.WeightFloor > 0 {
+				if newWeight < hw.ltpCfg.WeightFloor {
+					newWeight = hw.ltpCfg.WeightFloor
+				}
+			}
 		}
 
 		updates = append(updates, AssocWeightUpdate{
