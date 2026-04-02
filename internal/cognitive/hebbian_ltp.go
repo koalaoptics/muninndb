@@ -2,6 +2,12 @@ package cognitive
 
 import "sync"
 
+// maxLTPEntries caps the number of entries in the ltpState counts and potentiated
+// maps. When exceeded, new entries are silently dropped rather than growing unbounded.
+// Existing tracked pairs continue to accumulate counts normally; only brand-new pairs
+// are rejected. 10k entries is generous for any realistic single-session workload.
+const maxLTPEntries = 10000
+
 // LTPConfig configures Long-Term Potentiation behavior for the Hebbian worker.
 // When nil, LTP is disabled and all behavior is unchanged (backward compatible).
 //
@@ -18,15 +24,15 @@ type LTPConfig struct {
 	WeightFloor float32
 }
 
-// ltpState tracks per-workspace per-pair potentiation status in memory.
+// ltpState is session-scoped: potentiation status is not hydrated from storage
+// on restart. After a restart, associations must re-earn potentiation by
+// accumulating threshold co-activations in the new session. This is intentional —
+// session-local tracking avoids extra storage reads in the hot path.
+//
 // The authoritative co-activation count is in the storage layer (CoActivationCount);
 // this is a session-local cache for fast lookups during processBatch.
-//
-// Important: ltpState is session-scoped and NOT hydrated from storage on restart.
-// A process restart resets all potentiation status. Associations must be
-// re-observed (co-activated again) to regain potentiated status. This is
-// acceptable because LTP is a performance optimization (weight floor), not a
-// correctness requirement — the underlying association weights are persisted.
+// The underlying association weights ARE persisted — LTP is a performance
+// optimization (weight floor enforcement), not a correctness requirement.
 type ltpState struct {
 	mu          sync.RWMutex
 	potentiated map[ltpKey]struct{} // set of potentiated pairs
@@ -56,7 +62,12 @@ func (s *ltpState) addCount(ws [8]byte, pair pairKey, delta uint32, threshold in
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	old := s.counts[key]
+	old, exists := s.counts[key]
+	// Cap enforcement: if this is a brand-new pair and we are at capacity, skip it.
+	// Existing pairs continue to accumulate counts normally.
+	if !exists && len(s.counts) >= maxLTPEntries {
+		return false
+	}
 	newCount := old + delta
 	// Saturation
 	if newCount < old {

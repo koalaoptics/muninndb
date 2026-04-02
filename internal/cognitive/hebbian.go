@@ -215,6 +215,9 @@ func (hw *HebbianWorker) processBatch(ctx context.Context, batch []CoActivationE
 				if ps, ok := pairs[key]; ok {
 					ps.count++
 					ps.signal += signal
+					if ps.ltp == nil {
+						ps.ltp = event.LTP // keep non-nil LTP from later events
+					}
 				} else {
 					pairs[key] = &pairStats{count: 1, signal: signal, ws: event.WS, ltp: event.LTP}
 				}
@@ -268,6 +271,11 @@ func (hw *HebbianWorker) processBatch(ctx context.Context, batch []CoActivationE
 		// LTP: track co-activation count and enforce weight floor for potentiated pairs.
 		// Event-level LTP config (from vault plasticity) takes precedence; fall back
 		// to worker-level config for backward compatibility with direct construction.
+		//
+		// NOTE: The dream engine (consolidation/transitive.go) updates association
+		// weights via direct store.UpdateAssocWeight() calls, bypassing HebbianWorker.
+		// Dream can set weights below the LTP floor. This is a known interaction —
+		// coordinating with dream is tracked separately.
 		ltpCfg := stats.ltp
 		if ltpCfg == nil {
 			ltpCfg = hw.ltpCfg
