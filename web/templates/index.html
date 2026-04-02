@@ -40,8 +40,8 @@
 
     <!-- Logo (top of sidebar, replaces toggle) -->
     <div class="sidebar-logo">
-      <img src="/static/logo.jpg" alt="MuninnDB" />
-      <span class="sidebar-label" style="font-weight:700;font-size:0.9375rem;letter-spacing:0.01em;">MuninnDB</span>
+      <a href="https://muninndb.com" target="_blank" rel="noopener"><img src="/static/logo.jpg" alt="MuninnDB" /></a>
+      <span class="sidebar-label" style="font-weight:700;font-size:1.0625rem;letter-spacing:0.01em;line-height:1;">MuninnDB</span>
     </div>
 
     <!-- Nav items -->
@@ -125,22 +125,18 @@
         <span class="vault-item-name" x-text="vault"></span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;opacity:0.35;"><path d="M6 9l6 6 6-6"/></svg>
       </button>
-      <!-- New Vault button (icon only when collapsed, full label when expanded) -->
-      <button class="sidebar-newvault-btn" @click="createVault()" title="New Vault">
-        <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span class="sidebar-newvault-label">New Vault</span>
-      </button>
-
-      <!-- Live dot + theme toggle (always visible) -->
+      <!-- Live dot + theme toggle + help (always visible) -->
       <div class="sidebar-footer-row">
         <span class="ws-dot" :class="liveConnected ? 'connected' : 'disconnected'"
           :title="liveConnected ? 'Live connected' : 'Reconnecting...'"></span>
-        <button class="btn-ghost" style="font-size:1.125rem;padding:0.25rem 0.375rem;line-height:1;" @click="toggleTheme()" title="Toggle theme">◐</button>
-        <button class="btn-ghost" style="font-size:0.8125rem;padding:0.25rem 0.375rem;line-height:1;opacity:0.6;" @click="showShortcutsHelp=true" title="Keyboard shortcuts (?)">?</button>
+        <button class="sidebar-footer-icon" @click="toggleTheme()" title="Toggle theme">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>
+        </button>
+        <button class="sidebar-footer-icon" @click="showShortcutsHelp=true" title="Keyboard shortcuts (?)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </button>
+        <span x-show="appVersion" x-text="appVersion" class="sidebar-version-label"></span>
       </div>
-
-      <!-- Version label -->
-      <span x-show="appVersion" x-text="appVersion" style="font-size:0.625rem;color:var(--text-muted);opacity:0.5;user-select:none;"></span>
 
       <!-- Sign out (visible when authenticated) -->
       <button class="sidebar-item" x-show="isAuthenticated" @click="showSignOutConfirm = true" title="Sign out">
@@ -171,14 +167,14 @@
   </button>
 
   <!-- Main content area -->
-  <main class="app-main">
+  <main class="app-main" :style="currentView === 'logs' ? 'max-width:none;' : ''">
 
     <!-- ── Dashboard View ───────────────────────────────────────────── -->
     <div x-show="currentView==='dashboard'">
       <div style="display:flex;flex-direction:column;height:calc(100vh - 3rem);min-height:600px;">
       <!-- Dashboard header -->
       <div style="display:flex;align-items:baseline;gap:0.875rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-        <h2 style="margin:0;">Dashboard</h2>
+        <h2 class="page-title">Dashboard</h2>
         <div class="vault-chip" @click="vaultModalOpen=true" style="cursor:pointer;">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.7;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0018 0V5"/><path d="M3 12a9 3 0 0018 0"/></svg>
           <span class="vault-chip-btn" x-text="vault"></span>
@@ -377,7 +373,7 @@
     <div x-show="currentView==='memories'">
       <!-- Memories header -->
       <div style="display:flex;align-items:baseline;gap:0.875rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-        <h2 style="margin:0;">Memories</h2>
+        <h2 class="page-title">Memories</h2>
         <div class="vault-chip" @click="vaultModalOpen=true" style="cursor:pointer;">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.7;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0018 0V5"/><path d="M3 12a9 3 0 0018 0"/></svg>
           <span class="vault-chip-btn" x-text="vault"></span>
@@ -385,13 +381,9 @@
       </div>
 
       <!-- Memories sub-tab bar (Item 1) -->
-      <div style="display:flex;gap:0.25rem;margin-bottom:1.25rem;border-bottom:1px solid var(--border);">
-        <button @click="memoriesSubTab='list'"
-          :style="memoriesSubTab==='list' ? 'border-bottom:2px solid var(--accent);font-weight:600;opacity:1;' : 'opacity:0.6;'"
-          style="padding:0.5rem 1rem;font-size:0.875rem;background:none;border:none;cursor:pointer;color:var(--text-primary);transition:opacity 0.15s;">Memories</button>
-        <button @click="memoriesSubTab='contradictions'; loadContradictions()"
-          :style="memoriesSubTab==='contradictions' ? 'border-bottom:2px solid var(--accent);font-weight:600;opacity:1;' : 'opacity:0.6;'"
-          style="padding:0.5rem 1rem;font-size:0.875rem;background:none;border:none;cursor:pointer;color:var(--text-primary);transition:opacity 0.15s;display:flex;align-items:center;gap:0.5rem;">
+      <div class="tab-bar">
+        <button class="tab-btn" :class="{ active: memoriesSubTab==='list' }" @click="memoriesSubTab='list'">Memories</button>
+        <button class="tab-btn" :class="{ active: memoriesSubTab==='contradictions' }" @click="memoriesSubTab='contradictions'; loadContradictions()" style="display:flex;align-items:center;gap:0.5rem;">
           Contradictions
           <span x-show="contradictions.length > 0"
             style="font-size:0.65rem;background:rgba(239,68,68,0.15);color:#ef4444;border-radius:9999px;padding:0.1rem 0.45rem;font-weight:700;"
@@ -407,7 +399,7 @@
       </p>
 
       <!-- Filter bar -->
-      <div style="display:flex;gap:0.625rem;margin-bottom:1rem;align-items:center;flex-wrap:wrap;padding:0.625rem 0.75rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:0.5rem;">
+      <div style="display:flex;gap:0.625rem;margin-bottom:0.5rem;align-items:center;flex-wrap:wrap;padding:0.4rem 0.75rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:0.5rem;">
         <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);white-space:nowrap;">Browse filters</span>
         <!-- Sort -->
         <select x-model="memoryFilters.sort" style="font-size:0.8125rem;padding:0.25rem 0.5rem;background:var(--bg-card);border:1px solid var(--border);border-radius:0.375rem;color:var(--text-primary);" title="Sort order">
@@ -444,33 +436,29 @@
         <button class="btn-secondary" style="font-size:0.8125rem;padding:0.25rem 0.75rem;"
           @click="memoryFilters={sort:'created',tags:'',state:'',minConf:0,maxConf:0};page=0;loadMemories()">Reset</button>
       </div>
-      <div style="display:flex;gap:1rem;margin-bottom:1.5rem;align-items:center;flex-wrap:wrap;">
+      <div style="display:flex;gap:0.625rem;margin-bottom:1.5rem;align-items:center;flex-wrap:wrap;">
         <input id="memory-search-input" data-testid="input-search" class="input-field" placeholder="Search memories… (semantic, try natural language)" x-model="searchQuery"
-          @keydown.enter="searchMemories()" style="flex:1;min-width:200px;" />
+          @keydown.enter="searchMemories()" style="flex:1;min-width:200px;height:auto;padding:0.3rem 0.75rem;font-size:0.8125rem;" />
         <!-- Recall mode segmented control (Item 3: tooltips) -->
-        <div style="display:inline-flex;border:1px solid var(--border);border-radius:0.375rem;overflow:hidden;font-size:0.75rem;">
-          <button @click="searchMode = 'balanced'"
-            :style="searchMode === 'balanced' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
-            style="padding:0.25rem 0.625rem;border:none;cursor:pointer;transition:all 0.15s;"
+        <div style="display:inline-flex;border:1px solid var(--border);border-radius:0.5rem;overflow:hidden;font-size:0.8125rem;">
+          <button @click="searchMode = 'balanced'" class="seg-btn" :class="searchMode === 'balanced' && 'seg-active'"
+            :style="'padding:0.3rem 0.75rem;border:none;border-right:1px solid var(--border);cursor:pointer;transition:all 0.15s;font-weight:600;' + (searchMode === 'balanced' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);')"
             title="Blend keyword + semantic search with temporal decay (default)">Balanced</button>
-          <button @click="searchMode = 'semantic'"
-            :style="searchMode === 'semantic' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
-            style="padding:0.25rem 0.625rem;border:none;cursor:pointer;transition:all 0.15s;"
+          <button @click="searchMode = 'semantic'" class="seg-btn" :class="searchMode === 'semantic' && 'seg-active'"
+            :style="'padding:0.3rem 0.75rem;border:none;border-right:1px solid var(--border);cursor:pointer;transition:all 0.15s;font-weight:600;' + (searchMode === 'semantic' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);')"
             title="Pure vector similarity — best for concept matching">Semantic</button>
-          <button @click="searchMode = 'recent'"
-            :style="searchMode === 'recent' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
-            style="padding:0.25rem 0.625rem;border:none;cursor:pointer;transition:all 0.15s;"
+          <button @click="searchMode = 'recent'" class="seg-btn" :class="searchMode === 'recent' && 'seg-active'"
+            :style="'padding:0.3rem 0.75rem;border:none;border-right:1px solid var(--border);cursor:pointer;transition:all 0.15s;font-weight:600;' + (searchMode === 'recent' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);')"
             title="Prioritize recently created memories">Recent</button>
-          <button @click="searchMode = 'deep'"
-            :style="searchMode === 'deep' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
-            style="padding:0.25rem 0.625rem;border:none;cursor:pointer;transition:all 0.15s;"
+          <button @click="searchMode = 'deep'" class="seg-btn" :class="searchMode === 'deep' && 'seg-active'"
+            :style="'padding:0.3rem 0.75rem;border:none;cursor:pointer;transition:all 0.15s;font-weight:600;' + (searchMode === 'deep' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);')"
             title="Exhaustive graph traversal — slower but finds distant connections">Deep</button>
         </div>
-        <button class="btn-primary" @click="searchMemories()">Search</button>
-        <button class="btn-secondary" @click="page=0;searchQuery='';loadMemories()">Browse All</button>
-        <button class="btn-primary" data-testid="btn-new-memory" @click="showNewMemoryModal=true" title="New memory (n)">+ New Memory</button>
-        <button class="btn-secondary" @click="openDecideModal()" title="Record a decision">Record Decision</button>
-        <button class="btn-secondary"
+        <button class="btn-primary btn-sm" @click="searchMemories()">Search</button>
+        <button class="btn-secondary btn-sm" @click="page=0;searchQuery='';loadMemories()">Browse All</button>
+        <button class="btn-primary btn-sm" data-testid="btn-new-memory" @click="showNewMemoryModal=true" title="New memory (n)">+ New Memory</button>
+        <button class="btn-secondary btn-sm" @click="openDecideModal()" title="Record a decision">Record Decision</button>
+        <button class="btn-secondary btn-sm"
           :style="multiSelectMode ? 'background:rgba(6,182,212,0.15);border-color:var(--accent);color:var(--accent);' : ''"
           @click="toggleMultiSelect()" title="Select multiple memories to consolidate">Select</button>
         <button x-show="multiSelectMode && selectedMemoryIds.length >= 2"
@@ -590,13 +578,31 @@
 
       <!-- Detail panel (slide-in) -->
       <div x-show="selectedMemory !== null"
-        style="position:fixed;right:0;top:0;height:100vh;width:400px;background:var(--bg-surface);border-left:1px solid var(--border);padding:1.5rem;overflow-y:auto;z-index:40;"
+        :style="'position:fixed;right:0;top:0;height:100vh;z-index:40;transition:width 0.2s ease;width:' + (detailExpanded ? '80%' : '400px') + ';'"
         x-transition:enter="transition ease-out duration-200"
         x-transition:enter-start="transform translate-x-full"
         x-transition:enter-end="transform translate-x-0"
         x-transition:leave="transition ease-in duration-150"
         x-transition:leave-start="transform translate-x-0"
         x-transition:leave-end="transform translate-x-full">
+        <!-- Expand/collapse toggle on left border -->
+        <!-- Expand/collapse: semicircle on left border -->
+        <button @click="detailExpanded = !detailExpanded"
+          style="position:absolute;left:0;top:50%;transform:translate(-50%,-50%);width:1.75rem;height:1.75rem;border:none;background:none;cursor:pointer;padding:0;z-index:42;"
+          :title="detailExpanded ? 'Collapse panel' : 'Expand panel'">
+          <!-- Left half with border -->
+          <div style="position:absolute;inset:0;border-radius:50%;border:1px solid var(--border);background:var(--bg-surface);clip-path:inset(-1px 50% -1px -1px);pointer-events:none;"></div>
+          <!-- Right half without border, covers panel border -->
+          <div style="position:absolute;inset:0;border-radius:50%;background:var(--bg-surface);clip-path:inset(0 0 0 50%);pointer-events:none;"></div>
+          <!-- Chevron -->
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+            style="position:absolute;top:50%;left:50%;color:var(--text-muted);pointer-events:none;"
+            :style="'position:absolute;top:50%;left:50%;color:var(--text-muted);pointer-events:none;transform:translate(-50%,-50%)' + (detailExpanded ? ' rotate(180deg)' : '')">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+        <!-- Scrollable content -->
+        <div style="height:100%;background:var(--bg-surface);border-left:1px solid var(--border);padding:1.5rem;overflow-y:auto;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
           <!-- Item 7: Prev/Next navigation -->
           <div style="display:flex;align-items:center;gap:0.375rem;flex:1;min-width:0;">
@@ -613,19 +619,18 @@
               :style="selectedMemoryIndex() >= memories.length - 1 ? 'opacity:0.3;cursor:not-allowed;' : ''"
               title="Next memory">&rsaquo;</button>
           </div>
-          <button class="btn-ghost" @click="selectedMemory=null" style="flex-shrink:0;">✕</button>
-        </div>
-        <!-- Action buttons row -->
-        <div x-show="selectedMemory && !editingMemory" style="display:flex;gap:0.5rem;margin-bottom:1rem;">
-          <button class="btn-ghost" style="font-size:0.8125rem;padding:0.25rem 0.625rem;" @click="startEditMemory()">Edit</button>
-          <button class="btn-ghost" style="font-size:0.8125rem;padding:0.25rem 0.625rem;" @click="openLinkModal(selectedMemory.id)">Link</button>
+          <button class="btn-ghost" @click="selectedMemory=null;detailExpanded=false" style="flex-shrink:0;">✕</button>
         </div>
         <template x-if="selectedMemory">
           <div>
             <div class="form-group" style="margin-bottom:1rem;">
-              <label>Content</label>
+              <div style="display:flex;align-items:center;gap:0.5rem;">
+                <label style="margin:0;">Content</label>
+                <button x-show="!editingMemory" class="btn-ghost" style="font-size:0.75rem;padding:0.1rem 0.4rem;color:var(--primary);" @click="startEditMemory()">Edit</button>
+                <button x-show="!editingMemory" class="btn-ghost" style="font-size:0.75rem;padding:0.1rem 0.4rem;color:var(--primary);" @click="openLinkModal(selectedMemory.id)">Link Memory</button>
+              </div>
               <!-- Read-only view -->
-              <p x-show="!editingMemory" style="color:var(--text-primary);line-height:1.6;white-space:pre-wrap;" x-text="selectedMemory.content"></p>
+              <p x-show="!editingMemory" style="color:var(--text-primary);font-size:0.875rem;line-height:1.6;white-space:pre-wrap;" x-text="selectedMemory.content"></p>
               <!-- Edit mode -->
               <template x-if="editingMemory">
                 <div>
@@ -655,14 +660,14 @@
               <div class="confidence-bar"><div class="confidence-fill" :style="'width:' + Math.round((selectedMemory.confidence || 0) * 100) + '%'"></div></div>
             </div>
             <div class="form-group" style="margin-bottom:1rem;">
-              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.375rem;">
+              <div style="display:flex;align-items:center;gap:0.5rem;">
                 <label style="margin:0;">Tags</label>
-                <button x-show="!editingTags" class="btn-ghost" style="font-size:0.75rem;padding:0.1rem 0.4rem;" @click="startEditTags()">Edit</button>
+                <button x-show="!editingTags" class="btn-ghost" style="font-size:0.75rem;padding:0.1rem 0.4rem;color:var(--primary);" @click="startEditTags()">Edit</button>
               </div>
               <!-- Read-only tag chips -->
-              <div x-show="!editingTags" style="display:flex;flex-wrap:wrap;gap:0.25rem;">
+              <div x-show="!editingTags" style="line-height:1.8;">
                 <template x-for="tag in (selectedMemory.tags || [])" :key="tag">
-                  <span class="badge-warning" x-text="tag"></span>
+                  <span class="badge-warning badge-tag" x-text="tag"></span>
                 </template>
                 <span x-show="!(selectedMemory.tags && selectedMemory.tags.length)" style="color:var(--text-muted);font-size:0.875rem;">none</span>
               </div>
@@ -699,7 +704,7 @@
             </div>
             <div class="form-group">
               <label>Created</label>
-              <span style="color:var(--text-secondary);" x-text="selectedMemory.createdAt ? new Date(selectedMemory.createdAt * 1000).toLocaleString() : 'unknown'"></span>
+              <span style="color:var(--text-secondary);font-size:0.875rem;" x-text="selectedMemory.createdAt ? new Date(selectedMemory.createdAt * 1000).toLocaleString() : 'unknown'"></span>
             </div>
             <div class="form-group" style="margin-top:1rem;">
               <label>Lifecycle State</label>
@@ -717,6 +722,7 @@
             </div>
           </div>
         </template>
+        </div><!-- /scrollable content -->
       </div>
     </div>
 
@@ -725,7 +731,7 @@
     <div style="height:calc(100vh - 7rem);display:flex;flex-direction:column;">
       <!-- Graph header -->
       <div style="display:flex;align-items:baseline;gap:0.875rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-        <h2 style="margin:0;">Graph</h2>
+        <h2 class="page-title">Graph</h2>
         <div class="vault-chip" @click="vaultModalOpen=true" style="cursor:pointer;">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.7;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0018 0V5"/><path d="M3 12a9 3 0 0018 0"/></svg>
           <span class="vault-chip-btn" x-text="vault"></span>
@@ -733,9 +739,9 @@
       </div>
 
       <!-- Tabs -->
-      <div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;border-bottom:1px solid var(--border);padding-bottom:0;">
-        <button class="btn-secondary" :style="graphTab==='memory' ? 'border-bottom:2px solid #06b6d4;padding-bottom:0.625rem;' : 'padding-bottom:0.75rem;'" @click="graphTab='memory'">Memory Graph</button>
-        <button class="btn-secondary" :style="graphTab==='entity' ? 'border-bottom:2px solid #06b6d4;padding-bottom:0.625rem;' : 'padding-bottom:0.75rem;'" @click="graphTab='entity'">Entity Graph</button>
+      <div class="tab-bar">
+        <button class="tab-btn" :class="{ active: graphTab==='memory' }" @click="graphTab='memory'">Memory Graph</button>
+        <button class="tab-btn" :class="{ active: graphTab==='entity' }" @click="graphTab='entity'">Entity Graph</button>
       </div>
 
       <!-- Memory Graph Tab -->
@@ -810,7 +816,7 @@
 
     <!-- ── Observability View ─────────────────────────────────────── -->
     <div x-show="currentView==='observability'">
-      <h2 style="margin:0 0 1.5rem 0;">Observability</h2>
+      <h2 class="page-title" style="margin-bottom:1.5rem;">Observability</h2>
 
       <template x-if="obs">
         <div>
@@ -1057,7 +1063,7 @@
     <!-- ── Settings View ────────────────────────────────────────────── -->
     <div x-show="currentView==='settings'">
       <div style="display:flex;align-items:baseline;gap:1rem;margin-bottom:0;">
-        <h2 style="margin:0;">Settings</h2>
+        <h2 class="page-title">Settings</h2>
       </div>
 
       <!-- Sub-navigation tabs -->
@@ -1075,7 +1081,7 @@
           Manage admin credentials. The default credentials (<strong>root / password</strong>) should be changed after first login.
         </p>
         <div class="card-polished" style="max-width:480px;">
-          <h3 style="margin:0 0 1.25rem;font-size:1rem;">Change Admin Password</h3>
+          <h3 style="margin:0 0 1.25rem;font-size:1rem;">Change Admin Credentials</h3>
           <form @submit.prevent="changePassword()">
             <div class="form-group" style="margin-bottom:1rem;">
               <label>Username</label>
@@ -1118,7 +1124,7 @@
 
         <!-- Create key form -->
         <div class="card-polished" style="max-width:560px;margin-bottom:1.25rem;">
-          <h4 style="font-size:0.9375rem;margin:0 0 1rem;">Create New Key</h4>
+          <h4 style="font-size:0.9375rem;margin:0 0 1rem;">Create New API Key</h4>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.75rem;align-items:end;">
             <div class="form-group">
               <label>Vault</label>
@@ -1301,51 +1307,47 @@
 
                 <!-- Default -->
                 <div @click="plasticityForm.showAdvanced=false; plasticityForm.preset='default'; onPlasticityPresetChange()"
-                     :style="plasticityForm.preset==='default' && !plasticityForm.showAdvanced ? 'border:2px solid #6366f1;background:rgba(99,102,241,0.12);' : 'border:1px solid var(--border);background:var(--bg-elevated);'"
-                     style="border-radius:0.625rem;padding:0.875rem;cursor:pointer;transition:all 0.15s;">
+                     :style="'border-radius:0.625rem;cursor:pointer;transition:all 0.15s;' + (plasticityForm.preset==='default' && !plasticityForm.showAdvanced ? 'border:2px solid #6366f1;background:rgba(99,102,241,0.12);padding:calc(1.25rem - 1px);' : 'border:1px solid var(--border);background:var(--bg-elevated);padding:1.25rem;')">
                   <div style="font-weight:600;font-size:0.875rem;margin-bottom:0.25rem;">Default</div>
                   <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">General use</div>
                   <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
-                    <span style="font-size:0.65rem;background:rgba(99,102,241,0.2);color:#a5b4fc;border-radius:9999px;padding:0.1rem 0.4rem;">2-hop</span>
-                    <span style="font-size:0.65rem;background:rgba(99,102,241,0.2);color:#a5b4fc;border-radius:9999px;padding:0.1rem 0.4rem;">Hebbian</span>
-                    <span style="font-size:0.65rem;background:rgba(99,102,241,0.2);color:#a5b4fc;border-radius:9999px;padding:0.1rem 0.4rem;">Temporal</span>
+                    <span :style="'font-size:0.65rem;background:rgba(99,102,241,0.2);border-radius:9999px;padding:0.1rem 0.4rem;color:' + (isDarkMode ? '#a5b4fc' : '#4338ca')">2-hop</span>
+                    <span :style="'font-size:0.65rem;background:rgba(99,102,241,0.2);border-radius:9999px;padding:0.1rem 0.4rem;color:' + (isDarkMode ? '#a5b4fc' : '#4338ca')">Hebbian</span>
+                    <span :style="'font-size:0.65rem;background:rgba(99,102,241,0.2);border-radius:9999px;padding:0.1rem 0.4rem;color:' + (isDarkMode ? '#a5b4fc' : '#4338ca')">Temporal</span>
                   </div>
                 </div>
 
                 <!-- Reference -->
                 <div @click="plasticityForm.showAdvanced=false; plasticityForm.preset='reference'; onPlasticityPresetChange()"
-                     :style="plasticityForm.preset==='reference' && !plasticityForm.showAdvanced ? 'border:2px solid #10b981;background:rgba(16,185,129,0.12);' : 'border:1px solid var(--border);background:var(--bg-elevated);'"
-                     style="border-radius:0.625rem;padding:0.875rem;cursor:pointer;transition:all 0.15s;">
+                     :style="'border-radius:0.625rem;cursor:pointer;transition:all 0.15s;' + (plasticityForm.preset==='reference' && !plasticityForm.showAdvanced ? 'border:2px solid #10b981;background:rgba(16,185,129,0.12);padding:calc(1.25rem - 1px);' : 'border:1px solid var(--border);background:var(--bg-elevated);padding:1.25rem;')">
                   <div style="font-weight:600;font-size:0.875rem;margin-bottom:0.25rem;">Reference</div>
                   <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">Docs &amp; facts</div>
                   <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
-                    <span style="font-size:0.65rem;background:rgba(16,185,129,0.2);color:#6ee7b7;border-radius:9999px;padding:0.1rem 0.4rem;">3-hop</span>
-                    <span style="font-size:0.65rem;background:rgba(16,185,129,0.2);color:#6ee7b7;border-radius:9999px;padding:0.1rem 0.4rem;">No fading</span>
+                    <span :style="'font-size:0.65rem;background:rgba(16,185,129,0.2);border-radius:9999px;padding:0.1rem 0.4rem;color:' + (isDarkMode ? '#6ee7b7' : '#047857')">3-hop</span>
+                    <span :style="'font-size:0.65rem;background:rgba(16,185,129,0.2);border-radius:9999px;padding:0.1rem 0.4rem;color:' + (isDarkMode ? '#6ee7b7' : '#047857')">No fading</span>
                   </div>
                 </div>
 
                 <!-- Scratchpad -->
                 <div @click="plasticityForm.showAdvanced=false; plasticityForm.preset='scratchpad'; onPlasticityPresetChange()"
-                     :style="plasticityForm.preset==='scratchpad' && !plasticityForm.showAdvanced ? 'border:2px solid #f59e0b;background:rgba(245,158,11,0.12);' : 'border:1px solid var(--border);background:var(--bg-elevated);'"
-                     style="border-radius:0.625rem;padding:0.875rem;cursor:pointer;transition:all 0.15s;">
+                     :style="'border-radius:0.625rem;cursor:pointer;transition:all 0.15s;' + (plasticityForm.preset==='scratchpad' && !plasticityForm.showAdvanced ? 'border:2px solid #f59e0b;background:rgba(245,158,11,0.12);padding:calc(1.25rem - 1px);' : 'border:1px solid var(--border);background:var(--bg-elevated);padding:1.25rem;')">
                   <div style="font-weight:600;font-size:0.875rem;margin-bottom:0.25rem;">Scratchpad</div>
                   <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">Short-lived drafts</div>
                   <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
-                    <span style="font-size:0.65rem;background:rgba(245,158,11,0.2);color:#fcd34d;border-radius:9999px;padding:0.1rem 0.4rem;">Fast fading</span>
-                    <span style="font-size:0.65rem;background:rgba(245,158,11,0.2);color:#fcd34d;border-radius:9999px;padding:0.1rem 0.4rem;">No assoc.</span>
+                    <span :style="'font-size:0.65rem;background:rgba(245,158,11,0.2);border-radius:9999px;padding:0.1rem 0.4rem;color:' + (isDarkMode ? '#fcd34d' : '#b45309')">Fast fading</span>
+                    <span :style="'font-size:0.65rem;background:rgba(245,158,11,0.2);border-radius:9999px;padding:0.1rem 0.4rem;color:' + (isDarkMode ? '#fcd34d' : '#b45309')">No assoc.</span>
                   </div>
                 </div>
 
                 <!-- Knowledge Graph -->
                 <div @click="plasticityForm.showAdvanced=false; plasticityForm.preset='knowledge-graph'; onPlasticityPresetChange()"
-                     :style="plasticityForm.preset==='knowledge-graph' && !plasticityForm.showAdvanced ? 'border:2px solid #ec4899;background:rgba(236,72,153,0.12);' : 'border:1px solid var(--border);background:var(--bg-elevated);'"
-                     style="border-radius:0.625rem;padding:0.875rem;cursor:pointer;transition:all 0.15s;">
+                     :style="'border-radius:0.625rem;cursor:pointer;transition:all 0.15s;' + (plasticityForm.preset==='knowledge-graph' && !plasticityForm.showAdvanced ? 'border:2px solid #ec4899;background:rgba(236,72,153,0.12);padding:calc(1.25rem - 1px);' : 'border:1px solid var(--border);background:var(--bg-elevated);padding:1.25rem;')">
                   <div style="font-weight:600;font-size:0.875rem;margin-bottom:0.25rem;">Knowledge Graph</div>
                   <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">Dense concepts</div>
                   <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
-                    <span style="font-size:0.65rem;background:rgba(236,72,153,0.2);color:#f9a8d4;border-radius:9999px;padding:0.1rem 0.4rem;">4-hop</span>
-                    <span style="font-size:0.65rem;background:rgba(236,72,153,0.2);color:#f9a8d4;border-radius:9999px;padding:0.1rem 0.4rem;">Strong assoc.</span>
-                    <span style="font-size:0.65rem;background:rgba(236,72,153,0.2);color:#f9a8d4;border-radius:9999px;padding:0.1rem 0.4rem;">Slow fading</span>
+                    <span :style="'font-size:0.65rem;background:rgba(236,72,153,0.2);border-radius:9999px;padding:0.1rem 0.4rem;color:' + (isDarkMode ? '#f9a8d4' : '#be185d')">4-hop</span>
+                    <span :style="'font-size:0.65rem;background:rgba(236,72,153,0.2);border-radius:9999px;padding:0.1rem 0.4rem;color:' + (isDarkMode ? '#f9a8d4' : '#be185d')">Strong assoc.</span>
+                    <span :style="'font-size:0.65rem;background:rgba(236,72,153,0.2);border-radius:9999px;padding:0.1rem 0.4rem;color:' + (isDarkMode ? '#f9a8d4' : '#be185d')">Slow fading</span>
                   </div>
                 </div>
               </div>
@@ -1360,9 +1362,8 @@
                   {id:'deep',      label:'Deep',      desc:'4-hop graph'}
                 ]" :key="rm.id">
                   <div @click="plasticityForm.recallMode = rm.id"
-                       :style="plasticityForm.recallMode === rm.id ? 'border:2px solid var(--accent);background:rgba(99,102,241,0.12);' : 'border:1px solid var(--border);background:var(--bg-elevated);'"
-                       style="border-radius:0.625rem;padding:0.75rem;cursor:pointer;transition:all 0.15s;">
-                    <div style="font-weight:600;font-size:0.875rem;margin-bottom:0.125rem;" x-text="rm.label"></div>
+                       :style="'border-radius:0.625rem;cursor:pointer;transition:all 0.15s;' + (plasticityForm.recallMode === rm.id ? 'border:2px solid var(--accent);background:rgba(99,102,241,0.12);padding:calc(1.25rem - 1px);' : 'border:1px solid var(--border);background:var(--bg-elevated);padding:1.25rem;')">
+                    <div style="font-weight:600;font-size:0.875rem;margin-bottom:0.25rem;" x-text="rm.label"></div>
                     <div style="font-size:0.75rem;color:var(--text-muted);" x-text="rm.desc"></div>
                   </div>
                 </template>
@@ -1424,9 +1425,11 @@
             </div>
 
             <!-- Right: radar chart -->
-            <div>
+            <div style="min-width:0;overflow:visible;">
               <p style="font-size:0.8125rem;font-weight:600;color:var(--text-secondary);margin:0 0 0.75rem;text-transform:uppercase;letter-spacing:0.05em;">Preset Comparison</p>
-              <canvas id="plasticityChart" style="max-height:320px;"></canvas>
+              <div style="padding:0 1.5rem;">
+                <canvas id="plasticityChart" style="max-height:320px;"></canvas>
+              </div>
             </div>
           </div>
         </div>
@@ -1464,9 +1467,8 @@
               Merge Into…
             </button>
             <button @click="exportVault()" :disabled="vaultExporting"
-                    style="padding:0.5rem 1rem;font-size:0.875rem;font-weight:500;border-radius:0.5rem;border:1px solid #34d399;color:#10b981;background:transparent;cursor:pointer;transition:background 0.15s;"
-                    onmouseover="this.style.background='rgba(52,211,153,0.08)'" onmouseout="this.style.background='transparent'"
-                    :style="vaultExporting ? 'opacity:0.55;cursor:not-allowed;' : ''">
+                    :style="'padding:0.5rem 1rem;font-size:0.875rem;font-weight:500;border-radius:0.5rem;border:1px solid #34d399;color:#10b981;background:transparent;cursor:pointer;transition:background 0.15s;' + (vaultExporting ? 'opacity:0.55;cursor:not-allowed;' : '')"
+                    onmouseover="this.style.background='rgba(52,211,153,0.08)'" onmouseout="this.style.background='transparent'">
               <span x-text="vaultExporting ? 'Exporting…' : 'Export Vault'"></span>
             </button>
             <button @click="openImportModal()"
@@ -1475,9 +1477,8 @@
               Import Vault…
             </button>
             <button @click="reindexFTS()" :disabled="reindexing"
-                    style="padding:0.5rem 1rem;font-size:0.875rem;font-weight:500;border-radius:0.5rem;border:1px solid #60a5fa;color:#3b82f6;background:transparent;cursor:pointer;transition:background 0.15s;"
-                    onmouseover="this.style.background='rgba(96,165,250,0.08)'" onmouseout="this.style.background='transparent'"
-                    :style="reindexing ? 'opacity:0.55;cursor:not-allowed;' : ''">
+                    :style="'padding:0.5rem 1rem;font-size:0.875rem;font-weight:500;border-radius:0.5rem;border:1px solid #60a5fa;color:#3b82f6;background:transparent;cursor:pointer;transition:background 0.15s;' + (reindexing ? 'opacity:0.55;cursor:not-allowed;' : '')"
+                    onmouseover="this.style.background='rgba(96,165,250,0.08)'" onmouseout="this.style.background='transparent'">
               <span x-text="reindexing ? 'Reindexing…' : 'Reindex FTS'"></span>
             </button>
           </div>
@@ -1580,7 +1581,12 @@
               <!-- Provider selector pills -->
               <div style="margin-bottom:1rem;">
                 <div style="font-size:0.8125rem;font-weight:600;color:var(--text-primary);margin-bottom:0.625rem;">Select provider</div>
-                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                <div class="tab-bar" style="margin-top:0;margin-bottom:1rem;">
+                  <button
+                    @click="pluginCfg.embedProvider='none';pluginCfg.embedCmd=''"
+                    :class="pluginCfg.embedProvider==='none' ? 'tab-btn active' : 'tab-btn'">
+                    None
+                  </button>
                   <button
                     @click="pluginCfg.embedProvider='voyage';pluginCfg.embedCmd=''"
                     :class="pluginCfg.embedProvider==='voyage' ? 'tab-btn active' : 'tab-btn'"
@@ -1790,7 +1796,7 @@
               <!-- Provider selector pills -->
               <div style="margin-bottom:1rem;">
                 <div style="font-size:0.8125rem;font-weight:600;color:var(--text-primary);margin-bottom:0.625rem;">Select provider</div>
-                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                <div class="tab-bar" style="margin-top:0;margin-bottom:1rem;">
                   <template x-for="opt in [{val:'none',label:'None'},{val:'ollama',label:'Ollama (local)'},{val:'openai',label:'OpenAI'},{val:'anthropic',label:'Anthropic'},{val:'google',label:'Google'}]" :key="opt.val">
                     <button
                       @click="pluginCfg.enrichProvider=opt.val;pluginCfg.enrichCmd='';if(opt.val==='google')pluginCfg.enrichModel='gemini-1.5-flash';if(opt.val==='anthropic')pluginCfg.enrichModel='claude-haiku-4-5-20251001'"
@@ -1897,7 +1903,7 @@
               </div>
 
               <!-- Verbose LLM logs -->
-              <div style="display:flex;align-items:flex-start;gap:0.75rem;padding:0.75rem 0;border-top:1px solid var(--border);">
+              <div style="display:flex;align-items:flex-start;gap:0.75rem;padding:0.75rem 0;">
                 <input type="checkbox" id="llmVerboseLogs" :checked="pluginCfg.llm_verbose_logs === true"
                   @change="pluginCfg.llm_verbose_logs = $event.target.checked || undefined"
                   style="margin-top:0.125rem;cursor:pointer;" />
@@ -1954,17 +1960,14 @@
 
         <!-- Platform toggle -->
         <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;">
-          <span style="font-size:0.8125rem;color:var(--text-muted);">Platform:</span>
-          <div style="display:flex;border:1px solid var(--border);border-radius:0.375rem;overflow:hidden;">
-            <button @click="connectPlatform='macos'"
-              :style="connectPlatform==='macos' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
-              style="padding:0.25rem 0.75rem;font-size:0.8125rem;border:none;cursor:pointer;">macOS</button>
-            <button @click="connectPlatform='linux'"
-              :style="connectPlatform==='linux' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
-              style="padding:0.25rem 0.75rem;font-size:0.8125rem;border:none;border-left:1px solid var(--border);cursor:pointer;">Linux</button>
-            <button @click="connectPlatform='windows'"
-              :style="connectPlatform==='windows' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);'"
-              style="padding:0.25rem 0.75rem;font-size:0.8125rem;border:none;border-left:1px solid var(--border);cursor:pointer;">Windows</button>
+          <span style="font-size:0.875rem;font-weight:500;color:var(--text-muted);">Platform:</span>
+          <div style="display:inline-flex;border:1px solid var(--border);border-radius:0.5rem;overflow:hidden;">
+            <button @click="connectPlatform='macos'" class="seg-btn" :class="connectPlatform==='macos' && 'seg-active'"
+              :style="'padding:0.5rem 1rem;font-size:0.8125rem;border:none;border-right:1px solid var(--border);cursor:pointer;transition:all 0.15s;font-weight:600;' + (connectPlatform==='macos' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);')">macOS</button>
+            <button @click="connectPlatform='linux'" class="seg-btn" :class="connectPlatform==='linux' && 'seg-active'"
+              :style="'padding:0.5rem 1rem;font-size:0.8125rem;border:none;border-right:1px solid var(--border);cursor:pointer;transition:all 0.15s;font-weight:600;' + (connectPlatform==='linux' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);')">Linux</button>
+            <button @click="connectPlatform='windows'" class="seg-btn" :class="connectPlatform==='windows' && 'seg-active'"
+              :style="'padding:0.5rem 1rem;font-size:0.8125rem;border:none;cursor:pointer;transition:all 0.15s;font-weight:600;' + (connectPlatform==='windows' ? 'background:var(--accent);color:#fff;' : 'background:var(--bg-elevated);color:var(--text-secondary);')">Windows</button>
           </div>
         </div>
 
@@ -2172,7 +2175,7 @@ Authorization = "Bearer &lt;token from %USERPROFILE%\.muninn\mcp.token&gt;"</pre
     <!-- ── Session View ─────────────────────────────────────────────── -->
     <div x-show="currentView==='session'">
       <div style="display:flex;align-items:baseline;gap:0.875rem;margin-bottom:0.25rem;flex-wrap:wrap;">
-        <h2 style="margin:0;">Session Timeline</h2>
+        <h2 class="page-title">Session Timeline</h2>
         <div class="vault-chip" @click="vaultModalOpen=true" style="cursor:pointer;">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.7;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0018 0V5"/><path d="M3 12a9 3 0 0018 0"/></svg>
           <span class="vault-chip-btn" x-text="vault"></span>
@@ -2210,7 +2213,7 @@ Authorization = "Bearer &lt;token from %USERPROFILE%\.muninn\mcp.token&gt;"</pre
          style="display:flex;flex-direction:column;height:calc(100vh - 3rem);">
       <!-- Toolbar -->
       <div style="display:flex;align-items:center;gap:0.625rem;margin-bottom:0.625rem;flex-shrink:0;">
-        <h2 style="margin:0;font-size:1.125rem;">Server Logs</h2>
+        <h2 class="page-title">Server Logs</h2>
         <select x-model="levelFilter" style="background:var(--bg-elevated);color:var(--text-secondary);font-size:0.75rem;padding:0.25rem 0.5rem;border-radius:0.25rem;border:1px solid var(--border);">
           <option value="">All levels</option>
           <option value="DEBUG">DEBUG</option>
@@ -2250,7 +2253,7 @@ Authorization = "Bearer &lt;token from %USERPROFILE%\.muninn\mcp.token&gt;"</pre
     <div x-show="currentView==='cluster'" x-init="loadClusterEvents()">
       <!-- Cluster header -->
       <div style="display:flex;align-items:baseline;gap:0.875rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-        <h2 style="margin:0;">Cluster</h2>
+        <h2 class="page-title">Cluster</h2>
       </div>
 
       <!-- Cluster disabled state: Enable Cluster card -->
@@ -2272,33 +2275,30 @@ Authorization = "Bearer &lt;token from %USERPROFILE%\.muninn\mcp.token&gt;"</pre
           </div>
 
           <!-- Form -->
-          <div x-show="!clusterEnableLoading" style="display:flex;flex-direction:column;gap:1rem;">
-            <div>
-              <label style="display:block;font-size:0.75rem;font-weight:500;margin-bottom:0.375rem;color:var(--text-muted);">Role</label>
-              <select x-model="clusterEnableForm.role" style="width:100%;font-size:0.875rem;border-radius:0.375rem;padding:0.5rem 0.75rem;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);">
+          <div x-show="!clusterEnableLoading">
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label>Role</label>
+              <select x-model="clusterEnableForm.role" class="input-field">
                 <option value="primary">Primary (Cortex)</option>
                 <option value="replica">Replica (Lobe)</option>
                 <option value="sentinel">Sentinel</option>
                 <option value="observer">Observer</option>
               </select>
             </div>
-            <div>
-              <label style="display:block;font-size:0.75rem;font-weight:500;margin-bottom:0.375rem;color:var(--text-muted);">Bind Address</label>
-              <input x-model="clusterEnableForm.bindAddr" type="text" placeholder="10.0.0.1:7777"
-                style="width:100%;font-size:0.875rem;border-radius:0.375rem;padding:0.5rem 0.75rem;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);box-sizing:border-box;">
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label>Bind Address</label>
+              <input x-model="clusterEnableForm.bindAddr" type="text" placeholder="10.0.0.1:7777" class="input-field">
             </div>
-            <div x-show="clusterEnableForm.role !== 'primary'">
-              <label style="display:block;font-size:0.75rem;font-weight:500;margin-bottom:0.375rem;color:var(--text-muted);">Cortex Address</label>
-              <input x-model="clusterEnableForm.cortexAddr" type="text" placeholder="10.0.0.1:7777"
-                style="width:100%;font-size:0.875rem;border-radius:0.375rem;padding:0.5rem 0.75rem;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);box-sizing:border-box;">
+            <div class="form-group" x-show="clusterEnableForm.role !== 'primary'" style="margin-bottom:1rem;">
+              <label>Cortex Address</label>
+              <input x-model="clusterEnableForm.cortexAddr" type="text" placeholder="10.0.0.1:7777" class="input-field">
             </div>
-            <div>
-              <label style="display:block;font-size:0.75rem;font-weight:500;margin-bottom:0.375rem;color:var(--text-muted);">
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label>
                 Cluster Secret <span style="font-weight:400;color:var(--text-muted);">(recommended)</span>
               </label>
-              <input x-model="clusterEnableForm.clusterSecret" type="password" placeholder="Leave empty for open cluster"
-                style="width:100%;font-size:0.875rem;border-radius:0.375rem;padding:0.5rem 0.75rem;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);box-sizing:border-box;">
-              <p x-show="!clusterEnableForm.clusterSecret" style="margin:0.25rem 0 0;font-size:0.75rem;color:#eab308;">
+              <input x-model="clusterEnableForm.clusterSecret" type="password" placeholder="Leave empty for open cluster" class="input-field">
+              <p x-show="!clusterEnableForm.clusterSecret" style="margin:0;font-size:0.75rem;color:#eab308;">
                 &#9888; Without a secret, any node can join this cluster
               </p>
             </div>
@@ -2765,6 +2765,13 @@ Authorization = "Bearer &lt;token from %USERPROFILE%\.muninn\mcp.token&gt;"</pre
           </div>
         </template>
         <div x-show="vaults.filter(v => v.toLowerCase().includes(vaultPickerSearch.toLowerCase())).length===0" style="padding:1.25rem;text-align:center;color:var(--text-muted);font-size:0.875rem;">No vaults found</div>
+      </div>
+      <!-- New Vault action -->
+      <div style="border-top:1px solid var(--border);padding:0.5rem;">
+        <button class="vault-modal-item" style="width:100%;border-radius:0.375rem;" @click="vaultModalOpen=false; vaultPickerSearch=''; createVault()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.5;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>New Vault</span>
+        </button>
       </div>
     </div>
   </div>
