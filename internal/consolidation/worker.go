@@ -23,22 +23,24 @@ type EngineInterface interface {
 // Worker is the main consolidation worker that periodically runs a 5-phase
 // consolidation pipeline to reduce redundancy and strengthen associations.
 type Worker struct {
-	Engine         EngineInterface
-	Schedule       time.Duration // frequency of consolidation runs (default 6h)
-	MaxDedup       int           // max pairs to merge per run (default 100)
-	MaxTransitive  int           // max inferred edges per run (default 1000)
-	DryRun         bool          // if true, no mutations occur
-	DedupThreshold float32       // cosine similarity threshold for dedup (0 = use default 0.95)
+	Engine            EngineInterface
+	Schedule          time.Duration // frequency of consolidation runs (default 6h)
+	MaxDedup          int           // max pairs to merge per run (default 100)
+	MaxTransitive     int           // max inferred edges per run (default 1000)
+	DryRun            bool          // if true, no mutations occur
+	DedupThreshold    float32       // cosine similarity threshold for dedup (0 = use default 0.95)
+	MinDedupVaultSize int           // minimum active engrams required to run Phase 2 dedup (default 20)
 }
 
 // NewWorker creates a new consolidation worker with sensible defaults.
 func NewWorker(engine EngineInterface) *Worker {
 	return &Worker{
-		Engine:        engine,
-		Schedule:      6 * time.Hour,
-		MaxDedup:      100,
-		MaxTransitive: 1000,
-		DryRun:        false,
+		Engine:            engine,
+		Schedule:          6 * time.Hour,
+		MaxDedup:          100,
+		MaxTransitive:     1000,
+		DryRun:            false,
+		MinDedupVaultSize: 20,
 	}
 }
 
