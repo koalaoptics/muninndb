@@ -253,7 +253,7 @@ func TestDream_LegalVault_ZeroWrites(t *testing.T) {
 	wsPrefix := store.ResolveVaultPrefix(vault)
 
 	// Write a clear duplicate pair into the legal vault — if dedup ran, one would be archived.
-	dup  := []float32{1.0, 0.0, 0.0, 0.0}
+	dup      := []float32{1.0, 0.0, 0.0, 0.0}
 	dupClose := []float32{0.97, 0.24310, 0.0, 0.0}
 	id1 := writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
 		Concept: "clause-a", Content: "Party A agrees to pay Party B.", Confidence: 0.9,
@@ -308,7 +308,7 @@ func TestDream_LegalAdjacent_IsProcessed(t *testing.T) {
 
 	// Write 20 engrams including a clear duplicate pair. If the vault is incorrectly
 	// treated as legal, dedup will be skipped and MergedEngrams will be 0.
-	dup     := []float32{1.0, 0.0, 0.0, 0.0}
+	dup      := []float32{1.0, 0.0, 0.0, 0.0}
 	dupClose := []float32{0.97, 0.24310, 0.0, 0.0}
 
 	writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
@@ -351,63 +351,160 @@ func TestDream_LegalAdjacent_IsProcessed(t *testing.T) {
 }
 
 // TestDream_MinDedupVaultSize_Configurable verifies that MinDedupVaultSize is
-// respected when set explicitly on the Worker. A vault of 15 engrams with a
-// MinDedupVaultSize of 10 must run dedup; the same vault with MinDedupVaultSize
-// of 20 must skip it.
+// respected when set explicitly on the Worker. Two independent stores/vaults of
+// 15 engrams are used: one processed with MinDedupVaultSize=10 (dedup runs) and
+// one with MinDedupVaultSize=20 (dedup skips). Using separate stores ensures the
+// two worker instances do not share state even if DryRun semantics change.
 func TestDream_MinDedupVaultSize_Configurable(t *testing.T) {
+	t.Parallel()
+
+	dup      := []float32{1.0, 0.0, 0.0, 0.0}
+	dupClose := []float32{0.97, 0.24310, 0.0, 0.0}
+
+	// sub-test: MinDedupVaultSize=10, vault=15 engrams -> dedup runs.
+	t.Run("threshold_below_vault", func(t *testing.T) {
+		t.Parallel()
+		store, db, cleanup := testStoreWithDB(t)
+		defer cleanup()
+		ctx := context.Background()
+		const vault = "configurable-guard-low"
+		wsPrefix := store.ResolveVaultPrefix(vault)
+		writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+			Concept: "d-a", Content: "content a", Confidence: 0.9, Relevance: 0.8,
+			Stability: 25, Embedding: dup,
+		})
+		writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+			Concept: "d-b", Content: "content b", Confidence: 0.5, Relevance: 0.5,
+			Stability: 20, Embedding: dupClose,
+		})
+		for i := 0; i < 13; i++ {
+			embed := make([]float32, 15)
+			embed[i+2] = 1.0
+			writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+				Concept: "u", Content: "u", Confidence: 0.7, Relevance: 0.6,
+				Stability: 20, Embedding: embed,
+			})
+		}
+		mock := &mockEngineInterface{store: store}
+		w := NewWorker(mock)
+		w.MinDedupVaultSize = 10
+		report, err := w.DreamOnce(ctx, DreamOpts{DryRun: true, Force: true, Scope: vault})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// DedupClusters > 0 confirms Phase 2 was reached and found the pair.
+		if report.Reports[0].DedupClusters == 0 {
+			t.Errorf("MinDedupVaultSize=10, vault=15: expected DedupClusters > 0 (dedup should have run)")
+		}
+	})
+
+	// sub-test: MinDedupVaultSize=20, vault=15 engrams -> dedup skips.
+	t.Run("threshold_above_vault", func(t *testing.T) {
+		t.Parallel()
+		store, db, cleanup := testStoreWithDB(t)
+		defer cleanup()
+		ctx := context.Background()
+		const vault = "configurable-guard-high"
+		wsPrefix := store.ResolveVaultPrefix(vault)
+		writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+			Concept: "d-a", Content: "content a", Confidence: 0.9, Relevance: 0.8,
+			Stability: 25, Embedding: dup,
+		})
+		writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+			Concept: "d-b", Content: "content b", Confidence: 0.5, Relevance: 0.5,
+			Stability: 20, Embedding: dupClose,
+		})
+		for i := 0; i < 13; i++ {
+			embed := make([]float32, 15)
+			embed[i+2] = 1.0
+			writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+				Concept: "u", Content: "u", Confidence: 0.7, Relevance: 0.6,
+				Stability: 20, Embedding: embed,
+			})
+		}
+		mock := &mockEngineInterface{store: store}
+		w := NewWorker(mock)
+		w.MinDedupVaultSize = 20
+		report, err := w.DreamOnce(ctx, DreamOpts{DryRun: true, Force: true, Scope: vault})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.Reports[0].DedupClusters != 0 || report.Reports[0].MergedEngrams != 0 {
+			t.Errorf("MinDedupVaultSize=20, vault=15: DedupClusters=%d MergedEngrams=%d, want both 0 (guard should skip)",
+				report.Reports[0].DedupClusters, report.Reports[0].MergedEngrams)
+		}
+	})
+}
+
+// TestDream_WithEmbedCount_GuardIgnoresNoEmbedEngrams verifies that the vault-size
+// guard uses WithEmbed (embedding-bearing engrams) rather than EngramCount (all
+// engrams). A vault with 25 total engrams but only 8 with embeddings must fire
+// the guard (8 < 20) even though EngramCount would pass it (25 >= 20).
+//
+// This covers the blocking issue from the PR #359 review: EngramCount includes
+// embed-less engrams that never participate in dedup and do not affect the
+// normalization anchor.
+func TestDream_WithEmbedCount_GuardIgnoresNoEmbedEngrams(t *testing.T) {
 	t.Parallel()
 	store, db, cleanup := testStoreWithDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
-	const vault = "configurable-guard"
+	const vault = "embed-count-guard"
 	wsPrefix := store.ResolveVaultPrefix(vault)
 
-	dup     := []float32{1.0, 0.0, 0.0, 0.0}
+	dup      := []float32{1.0, 0.0, 0.0, 0.0}
 	dupClose := []float32{0.97, 0.24310, 0.0, 0.0}
 
+	// 8 engrams WITH embeddings (including a duplicate pair that WOULD merge if dedup ran).
 	writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
-		Concept: "d-a", Content: "content a", Confidence: 0.9, Relevance: 0.8,
+		Concept: "dup-a", Content: "content a", Confidence: 0.9, Relevance: 0.8,
 		Stability: 25, Embedding: dup,
 	})
 	writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
-		Concept: "d-b", Content: "content b", Confidence: 0.5, Relevance: 0.5,
+		Concept: "dup-b", Content: "content b", Confidence: 0.5, Relevance: 0.5,
 		Stability: 20, Embedding: dupClose,
 	})
-	for i := 0; i < 13; i++ {
-		embed := make([]float32, 15)
+	for i := 0; i < 6; i++ {
+		embed := make([]float32, 10)
 		embed[i+2] = 1.0
 		writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
-			Concept: "u", Content: "u", Confidence: 0.7, Relevance: 0.6,
+			Concept: "unique", Content: "unique", Confidence: 0.7, Relevance: 0.6,
 			Stability: 20, Embedding: embed,
 		})
 	}
-	// vault now has 15 engrams
+	// WithEmbed = 8
+
+	// 17 engrams WITHOUT embeddings — inflates EngramCount to 25 but contributes
+	// nothing to WithEmbed and has no effect on the normalization anchor.
+	for i := 0; i < 17; i++ {
+		writeEngramWithEmbedding(t, ctx, store, db, wsPrefix, &storage.Engram{
+			Concept: "no-embed", Content: "no embedding engram",
+			Confidence: 0.5, Relevance: 0.5, Stability: 10,
+			// Embedding intentionally absent
+		})
+	}
+	// EngramCount = 25, WithEmbed = 8
 
 	mock := &mockEngineInterface{store: store}
+	w := NewWorker(mock) // MinDedupVaultSize = 20
 
-	// With MinDedupVaultSize=10: 15 >= 10, dedup runs.
-	w1 := NewWorker(mock)
-	w1.MinDedupVaultSize = 10
-	report1, err := w1.DreamOnce(ctx, DreamOpts{DryRun: true, Force: true, Scope: vault})
+	report, err := w.DreamOnce(ctx, DreamOpts{Force: true, Scope: vault})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// In DryRun the dedup logic runs (clusters are found) but no mutations occur.
-	// DedupClusters > 0 confirms Phase 2 was reached and found the pair.
-	if report1.Reports[0].DedupClusters == 0 {
-		t.Errorf("MinDedupVaultSize=10, vault=15: expected DedupClusters > 0 (dedup should have run)")
+	if len(report.Reports) != 1 {
+		t.Fatalf("expected 1 report, got %d", len(report.Reports))
 	}
 
-	// With MinDedupVaultSize=20: 15 < 20, dedup skipped.
-	w2 := NewWorker(mock)
-	w2.MinDedupVaultSize = 20
-	report2, err := w2.DreamOnce(ctx, DreamOpts{DryRun: true, Force: true, Scope: vault})
-	if err != nil {
-		t.Fatal(err)
+	// Guard must fire: WithEmbed=8 < MinDedupVaultSize=20.
+	// MergedEngrams and DedupClusters must both be 0.
+	if report.Reports[0].MergedEngrams != 0 {
+		t.Errorf("embed-count-guard: MergedEngrams = %d, want 0 (WithEmbed=8 should have triggered guard)",
+			report.Reports[0].MergedEngrams)
 	}
-	if report2.Reports[0].DedupClusters != 0 || report2.Reports[0].MergedEngrams != 0 {
-		t.Errorf("MinDedupVaultSize=20, vault=15: DedupClusters=%d MergedEngrams=%d, want both 0 (guard should skip)",
-			report2.Reports[0].DedupClusters, report2.Reports[0].MergedEngrams)
+	if report.Reports[0].DedupClusters != 0 {
+		t.Errorf("embed-count-guard: DedupClusters = %d, want 0 (guard should have prevented dedup)",
+			report.Reports[0].DedupClusters)
 	}
 }

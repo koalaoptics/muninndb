@@ -115,9 +115,19 @@ func (w *Worker) DreamOnce(ctx context.Context, opts DreamOpts) (*DreamReport, e
 		if minSize <= 0 {
 			minSize = 20
 		}
-		if summary != nil && summary.EngramCount < minSize {
+		// embedCount is the number of engrams that actually participate in
+		// dedup (Phase 2 operates only on embedding-bearing engrams). Using
+		// WithEmbed rather than EngramCount avoids counting embed-less engrams
+		// that would never affect the normalization anchor.
+		// When summary is nil (Phase 0 failed), vault size is unknown — skip
+		// dedup defensively rather than proceeding blind.
+		embedCount := 0
+		if summary != nil {
+			embedCount = summary.WithEmbed
+		}
+		if summary == nil || embedCount < minSize {
 			slog.Info("dream: skipping phase 2 dedup — vault below minimum size",
-				"vault", vault, "engrams", summary.EngramCount, "min", minSize)
+				"vault", vault, "engrams_with_embed", embedCount, "min", minSize)
 		} else if err := dw.runPhase2Dedup(ctx, store, wsPrefix, report, vault); err != nil {
 			slog.Warn("dream: phase 2 (dedup) failed", "vault", vault, "error", err)
 			report.Errors = append(report.Errors, "phase2_dedup: "+err.Error())
