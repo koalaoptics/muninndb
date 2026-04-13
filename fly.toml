@@ -16,6 +16,7 @@ primary_region = "ewr"
   min_machines_running = 1
 
 [[vm]]
-  memory = "512mb"
-  cpu_kind = "shared"
-  cpus = 1
+  size = "performance-4x"
+  memory = "8gb"
+  cpu_kind = "performance"
+  cpus = 4
