@@ -285,8 +285,8 @@ func (s *MCPServer) handleRecall(ctx context.Context, w http.ResponseWriter, id 
 	}
 	if limit < 1 {
 		limit = 1
-	} else if limit > 100 {
-		limit = 100
+	} else if limit > 200 {
+		limit = 200
 	}
 
 	profile, _ := args["profile"].(string)
@@ -1712,8 +1712,8 @@ func (s *MCPServer) handleEntityTimeline(ctx context.Context, w http.ResponseWri
 	if limit < 1 {
 		limit = 1
 	}
-	if limit > 50 {
-		limit = 50
+	if limit > 200 {
+		limit = 200
 	}
 	timeline, err := s.engine.GetEntityTimeline(ctx, vault, entityName, limit)
 	if err != nil {
