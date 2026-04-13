@@ -910,10 +910,17 @@ func (s *MCPServer) handleFindByEntity(ctx context.Context, w http.ResponseWrite
 	if limit < 1 {
 		limit = 1
 	}
-	if limit > 50 {
-		limit = 50
+	if limit > 500 {
+		limit = 500
 	}
-	engrams, err := s.engine.FindByEntity(ctx, vault, entityName, limit)
+	offset := 0
+	if v, ok := args["offset"].(float64); ok {
+		offset = int(v)
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	result, err := s.engine.FindByEntity(ctx, vault, entityName, limit, offset)
 	if err != nil {
 		sendError(w, id, -32000, "tool error: "+err.Error())
 		return
@@ -924,8 +931,8 @@ func (s *MCPServer) handleFindByEntity(ctx context.Context, w http.ResponseWrite
 		Summary string `json:"summary,omitempty"`
 		State   string `json:"state"`
 	}
-	entries := make([]engramEntry, 0, len(engrams))
-	for _, e := range engrams {
+	entries := make([]engramEntry, 0, len(result.Engrams))
+	for _, e := range result.Engrams {
 		entries = append(entries, engramEntry{
 			ID:      e.ID.String(),
 			Concept: e.Concept,
@@ -937,6 +944,9 @@ func (s *MCPServer) handleFindByEntity(ctx context.Context, w http.ResponseWrite
 		"entity":  entityName,
 		"engrams": entries,
 		"count":   len(entries),
+		"total":   result.Total,
+		"offset":  offset,
+		"limit":   limit,
 	})
 	sendResult(w, id, textContent(string(out)))
 }
