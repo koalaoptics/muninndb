@@ -494,7 +494,8 @@ func allToolDefinitions() []ToolDefinition {
 				"properties": map[string]any{
 					"entity_name": map[string]any{"type": "string", "description": "The entity name to look up (e.g. 'PostgreSQL', 'Alice')"},
 					"vault":       vaultProp,
-					"limit":       map[string]any{"type": "integer", "description": "Max results (1-50, default 20)"},
+					"limit":       map[string]any{"type": "integer", "description": "Max results (1-500, default 20)"},
+					"offset":      map[string]any{"type": "integer", "description": "Skip first N results for pagination (default 0). Use with limit to page through large result sets. Response includes 'total' for the full match count."},
 				},
 				"required": []string{"entity_name"},
 			},

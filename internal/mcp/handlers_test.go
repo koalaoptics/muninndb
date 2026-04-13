@@ -1211,14 +1211,15 @@ func TestHandleStatus_IncludesEnrichmentMode(t *testing.T) {
 
 type findByEntityEngine struct{ fakeEngine }
 
-func (f *findByEntityEngine) FindByEntity(_ context.Context, _, name string, _ int) ([]*storage.Engram, error) {
+func (f *findByEntityEngine) FindByEntity(_ context.Context, _, name string, _, _ int) (*engine.FindByEntityResult, error) {
 	if name == "PostgreSQL" {
 		id := storage.NewULID()
-		return []*storage.Engram{
+		engrams := []*storage.Engram{
 			{ID: id, Concept: "DB choice", Summary: "Chose PostgreSQL"},
-		}, nil
+		}
+		return &engine.FindByEntityResult{Engrams: engrams, Total: len(engrams)}, nil
 	}
-	return nil, nil
+	return &engine.FindByEntityResult{Engrams: nil, Total: 0}, nil
 }
 
 func TestHandleFindByEntity_HappyPath(t *testing.T) {
@@ -1290,19 +1291,19 @@ type findByEntityCapturingEngine struct {
 	lastLimit int
 }
 
-func (f *findByEntityCapturingEngine) FindByEntity(_ context.Context, _, _ string, limit int) ([]*storage.Engram, error) {
+func (f *findByEntityCapturingEngine) FindByEntity(_ context.Context, _, _ string, limit, _ int) (*engine.FindByEntityResult, error) {
 	f.lastLimit = limit
-	return []*storage.Engram{}, nil
+	return &engine.FindByEntityResult{Engrams: []*storage.Engram{}, Total: 0}, nil
 }
 
 func TestHandleFindByEntity_LimitCapped(t *testing.T) {
 	eng := &findByEntityCapturingEngine{}
 	srv := newTestServerWith(eng)
-	// Request limit=999; handler must cap to 50 before calling engine.
+	// Request limit=999; handler must cap to 500 before calling engine.
 	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_find_by_entity","arguments":{"vault":"default","entity_name":"TestEntity","limit":999}}}`
 	postRPC(t, srv, body)
-	if eng.lastLimit != 50 {
-		t.Errorf("expected engine to receive limit=50 after capping, got %d", eng.lastLimit)
+	if eng.lastLimit != 5000 {
+		t.Errorf("expected engine to receive limit=500 after capping, got %d", eng.lastLimit)
 	}
 }
 
@@ -1442,7 +1443,7 @@ func TestHandleWhereLeftOff_LimitCapped(t *testing.T) {
 	srv := newTestServerWith(eng)
 	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_where_left_off","arguments":{"vault":"default","limit":999}}}`
 	postRPC(t, srv, body)
-	if eng.lastLimit != 50 {
+	if eng.lastLimit != 500 {
 		t.Errorf("expected limit capped to 50, got %d", eng.lastLimit)
 	}
 }
@@ -1646,8 +1647,8 @@ func (e *slowIdempotentEngine) GetEnrichmentMode(ctx context.Context) string {
 func (e *slowIdempotentEngine) WhereLeftOff(ctx context.Context, vault string, limit int) ([]WhereLeftOffEntry, error) {
 	return (&fakeEngine{}).WhereLeftOff(ctx, vault, limit)
 }
-func (e *slowIdempotentEngine) FindByEntity(ctx context.Context, vault, entityName string, limit int) ([]*storage.Engram, error) {
-	return (&fakeEngine{}).FindByEntity(ctx, vault, entityName, limit)
+func (e *slowIdempotentEngine) FindByEntity(ctx context.Context, vault, entityName string, limit, offset int) (*engine.FindByEntityResult, error) {
+	return (&fakeEngine{}).FindByEntity(ctx, vault, entityName, limit, offset)
 }
 func (e *slowIdempotentEngine) SetEntityState(ctx context.Context, entityName, state, mergedInto, entityType string) error {
 	return (&fakeEngine{}).SetEntityState(ctx, entityName, state, mergedInto, entityType)

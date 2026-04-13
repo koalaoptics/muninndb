@@ -37,8 +37,8 @@ func (e *Engine) GetEntityTimeline(ctx context.Context, vault string, entityName
 	if limit <= 0 {
 		limit = 10
 	}
-	if limit > 50 {
-		limit = 50
+	if limit > 200 {
+		limit = 200
 	}
 
 	// Get the entity record to check if it exists and get FirstSeen + MentionCount.
