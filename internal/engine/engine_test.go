@@ -622,19 +622,16 @@ func TestEngineUpdateContent_ContentReplaced(t *testing.T) {
 		t.Fatalf("UpdateContent: %v", err)
 	}
 
-	got, err := eng.Read(ctx, &mbp.ReadRequest{Vault: "test", IDs: []string{resp.ID}})
+	got, err := eng.Read(ctx, &mbp.ReadRequest{Vault: "test", ID: resp.ID})
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if len(got.Engrams) != 1 {
-		t.Fatalf("expected 1 engram, got %d", len(got.Engrams))
-	}
-	if got.Engrams[0].Content != "after" {
-		t.Fatalf("content not replaced; got %q want %q", got.Engrams[0].Content, "after")
+	if got.Content != "after" {
+		t.Fatalf("content not replaced; got %q want %q", got.Content, "after")
 	}
 	// Concept must be preserved (no "(evolved)" suffix that Evolve would add).
-	if got.Engrams[0].Concept != "c" {
-		t.Fatalf("concept changed; got %q want %q", got.Engrams[0].Concept, "c")
+	if got.Concept != "c" {
+		t.Fatalf("concept changed; got %q want %q", got.Concept, "c")
 	}
 }
 
@@ -649,9 +646,9 @@ func TestEngineUpdateContent_ConfidenceUnchangedWhenSentinel(t *testing.T) {
 		t.Fatalf("UpdateContent: %v", err)
 	}
 
-	got, _ := eng.Read(ctx, &mbp.ReadRequest{Vault: "test", IDs: []string{resp.ID}})
-	if got.Engrams[0].Confidence != 0.5 {
-		t.Fatalf("confidence should be unchanged with sentinel; got %f want 0.5", got.Engrams[0].Confidence)
+	got, _ := eng.Read(ctx, &mbp.ReadRequest{Vault: "test", ID: resp.ID})
+	if got.Confidence != 0.5 {
+		t.Fatalf("confidence should be unchanged with sentinel; got %f want 0.5", got.Confidence)
 	}
 }
 
@@ -666,9 +663,9 @@ func TestEngineUpdateContent_ConfidenceSetWhenProvided(t *testing.T) {
 		t.Fatalf("UpdateContent: %v", err)
 	}
 
-	got, _ := eng.Read(ctx, &mbp.ReadRequest{Vault: "test", IDs: []string{resp.ID}})
-	if got.Engrams[0].Confidence != 0.95 {
-		t.Fatalf("confidence not updated; got %f want 0.95", got.Engrams[0].Confidence)
+	got, _ := eng.Read(ctx, &mbp.ReadRequest{Vault: "test", ID: resp.ID})
+	if got.Confidence != 0.95 {
+		t.Fatalf("confidence not updated; got %f want 0.95", got.Confidence)
 	}
 }
 
