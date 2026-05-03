@@ -17,11 +17,11 @@ fetch-assets: fetch-model fetch-ort-libs
 fetch-model:
 	@echo "==> Downloading bge-small-en-v1.5 INT8 model..."
 	@mkdir -p $(ASSETS_DIR)
-	@curl -fL --progress-bar \
+	@curl -fL --progress-bar --retry 5 --retry-all-errors --retry-delay 3 \
 		"$(HF_BASE)/onnx/model_int8.onnx" \
 		-o "$(ASSETS_DIR)/model_int8.onnx"
 	@echo "==> Downloading tokenizer.json..."
-	@curl -fL --progress-bar \
+	@curl -fL --progress-bar --retry 5 --retry-all-errors --retry-delay 3 \
 		"https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/tokenizer.json" \
 		-o "$(ASSETS_DIR)/tokenizer.json"
 	@echo "    model_int8.onnx: $$(du -sh $(ASSETS_DIR)/model_int8.onnx | cut -f1)"
