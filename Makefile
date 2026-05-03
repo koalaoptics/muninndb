@@ -73,15 +73,19 @@ _ort-darwin-amd64:
 	@echo "    darwin/amd64: $$(du -sh $(ASSETS_DIR)/libonnxruntime_darwin_amd64.dylib | cut -f1)"
 
 _ort-linux-amd64:
-	@echo "    Fetching linux/amd64..."
-	@curl -fL --progress-bar \
-		"$(ORT_BASE)/onnxruntime-linux-x64-$(ORT_VERSION).tgz" \
-		-o "/tmp/ort-linux-amd64.tgz"
-	@tar -xzf /tmp/ort-linux-amd64.tgz -C /tmp onnxruntime-linux-x64-$(ORT_VERSION)/lib/libonnxruntime.so.$(ORT_VERSION) 2>/dev/null || \
-		tar -xzf /tmp/ort-linux-amd64.tgz -C /tmp --strip-components=2 --wildcards '*/lib/libonnxruntime.so.*'
-	@cp /tmp/onnxruntime-linux-x64-$(ORT_VERSION)/lib/libonnxruntime.so.$(ORT_VERSION) $(ASSETS_DIR)/libonnxruntime_linux_amd64.so 2>/dev/null || \
-		find /tmp -name 'libonnxruntime.so.*' | head -1 | xargs -I{} cp {} $(ASSETS_DIR)/libonnxruntime_linux_amd64.so
-	@echo "    linux/amd64: $$(du -sh $(ASSETS_DIR)/libonnxruntime_linux_amd64.so | cut -f1)"
+	@if [ -z "$(FORCE)" ] && [ -s "$(ASSETS_DIR)/libonnxruntime_linux_amd64.so" ]; then \
+		echo "    linux/amd64: already present ($$(du -sh $(ASSETS_DIR)/libonnxruntime_linux_amd64.so | cut -f1)), skipping download."; \
+	else \
+		echo "    Fetching linux/amd64..."; \
+		curl -fL --progress-bar --retry 5 --retry-all-errors --retry-delay 3 \
+			"$(ORT_BASE)/onnxruntime-linux-x64-$(ORT_VERSION).tgz" \
+			-o "/tmp/ort-linux-amd64.tgz"; \
+		tar -xzf /tmp/ort-linux-amd64.tgz -C /tmp onnxruntime-linux-x64-$(ORT_VERSION)/lib/libonnxruntime.so.$(ORT_VERSION) 2>/dev/null || \
+			tar -xzf /tmp/ort-linux-amd64.tgz -C /tmp --strip-components=2 --wildcards '*/lib/libonnxruntime.so.*'; \
+		cp /tmp/onnxruntime-linux-x64-$(ORT_VERSION)/lib/libonnxruntime.so.$(ORT_VERSION) $(ASSETS_DIR)/libonnxruntime_linux_amd64.so 2>/dev/null || \
+			find /tmp -name 'libonnxruntime.so.*' | head -1 | xargs -I{} cp {} $(ASSETS_DIR)/libonnxruntime_linux_amd64.so; \
+		echo "    linux/amd64: $$(du -sh $(ASSETS_DIR)/libonnxruntime_linux_amd64.so | cut -f1)"; \
+	fi
 
 _ort-linux-arm64:
 	@echo "    Fetching linux/arm64..."
