@@ -488,16 +488,29 @@ func allToolDefinitions() []ToolDefinition {
 		// Entity reverse index tool
 		{
 			Name:        "muninn_find_by_entity",
-			Description: "Return all memories that mention a given named entity. Uses the entity reverse index for fast O(matches) lookup.",
+			Description: "Return all memories that mention a given named entity. Uses the entity reverse index for fast O(matches) lookup. When include_content=true, each engram is returned hydrated with content + confidence + created_at, eliminating the need for a follow-up muninn_read per result.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"entity_name": map[string]any{"type": "string", "description": "The entity name to look up (e.g. 'PostgreSQL', 'Alice')"},
-					"vault":       vaultProp,
-					"limit":       map[string]any{"type": "integer", "description": "Max results (1-500, default 20)"},
-					"offset":      map[string]any{"type": "integer", "description": "Skip first N results for pagination (default 0). Use with limit to page through large result sets. Response includes 'total' for the full match count."},
+					"entity_name":     map[string]any{"type": "string", "description": "The entity name to look up (e.g. 'PostgreSQL', 'Alice')"},
+					"vault":           vaultProp,
+					"limit":           map[string]any{"type": "integer", "description": "Max results (1-500, default 20)"},
+					"offset":          map[string]any{"type": "integer", "description": "Skip first N results for pagination (default 0). Use with limit to page through large result sets. Response includes 'total' for the full match count."},
+					"include_content": map[string]any{"type": "boolean", "description": "If true, return each engram with full content, confidence, and created_at populated. Default false (backward-compatible: id/concept/summary/state only)."},
 				},
 				"required": []string{"entity_name"},
+			},
+		},
+		{
+			Name:        "muninn_read_batch",
+			Description: "Hydrate multiple memories by ID in a single call. Returns content + confidence + concept + created_at per ID. Missing IDs are omitted (not errored). Use when you have a list of IDs from a separate path (sequence chain, prediction id, etc) and want to avoid N×muninn_read round-trips.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"ids":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "List of memory ULIDs to hydrate (max 500 per call)."},
+					"vault": vaultProp,
+				},
+				"required": []string{"ids"},
 			},
 		},
 		// Entity lifecycle state tool

@@ -1250,6 +1250,72 @@ func TestHandleFindByEntity_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHandleFindByEntity_IncludeContent(t *testing.T) {
+	// Sprint 7: include_content=true should hydrate Content + Confidence + CreatedAt.
+	srv := newTestServerWith(&findByEntityIncludeContentEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_find_by_entity","arguments":{"vault":"default","entity_name":"PostgreSQL","include_content":true}}}`
+	w := postRPC(t, srv, body)
+	content := extractInnerJSON(t, decodeResp(t, w.Body.String()))
+
+	if got, _ := content["include_content"].(bool); !got {
+		t.Errorf("include_content flag not echoed in response")
+	}
+	engrams, _ := content["engrams"].([]any)
+	if len(engrams) != 1 {
+		t.Fatalf("expected 1 engram, got %d", len(engrams))
+	}
+	entry, _ := engrams[0].(map[string]any)
+	if entry["content"] != "PG is the chosen DB" {
+		t.Errorf("content not hydrated; got %v", entry["content"])
+	}
+	if conf, ok := entry["confidence"].(float64); !ok || conf == 0 {
+		t.Errorf("confidence not populated; got %v", entry["confidence"])
+	}
+	if entry["created_at"] == "" || entry["created_at"] == nil {
+		t.Errorf("created_at not populated; got %v", entry["created_at"])
+	}
+}
+
+func TestHandleFindByEntity_BackwardCompat(t *testing.T) {
+	// include_content omitted → legacy lean shape, no content/confidence/created_at fields.
+	srv := newTestServerWith(&findByEntityIncludeContentEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_find_by_entity","arguments":{"vault":"default","entity_name":"PostgreSQL"}}}`
+	w := postRPC(t, srv, body)
+	content := extractInnerJSON(t, decodeResp(t, w.Body.String()))
+
+	engrams, _ := content["engrams"].([]any)
+	if len(engrams) != 1 {
+		t.Fatalf("expected 1 engram, got %d", len(engrams))
+	}
+	entry, _ := engrams[0].(map[string]any)
+	if _, ok := entry["content"]; ok {
+		t.Errorf("content field present without include_content=true (omitempty broken)")
+	}
+	if _, ok := entry["confidence"]; ok {
+		t.Errorf("confidence field present without include_content=true")
+	}
+}
+
+type findByEntityIncludeContentEngine struct{ fakeEngine }
+
+func (f *findByEntityIncludeContentEngine) FindByEntity(_ context.Context, _, name string, _, _ int) (*engine.FindByEntityResult, error) {
+	if name == "PostgreSQL" {
+		id := storage.NewULID()
+		engrams := []*storage.Engram{
+			{
+				ID:         id,
+				Concept:    "DB choice",
+				Summary:    "Chose PostgreSQL",
+				Content:    "PG is the chosen DB",
+				Confidence: 0.9,
+				CreatedAt:  time.Now().UTC(),
+			},
+		}
+		return &engine.FindByEntityResult{Engrams: engrams, Total: len(engrams)}, nil
+	}
+	return &engine.FindByEntityResult{Engrams: nil, Total: 0}, nil
+}
+
 func TestHandleFindByEntity_EmptyName(t *testing.T) {
 	srv := newTestServerWith(&findByEntityEngine{})
 	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_find_by_entity","arguments":{"vault":"default","entity_name":""}}}`
@@ -1304,6 +1370,63 @@ func TestHandleFindByEntity_LimitCapped(t *testing.T) {
 	postRPC(t, srv, body)
 	if eng.lastLimit != 5000 {
 		t.Errorf("expected engine to receive limit=500 after capping, got %d", eng.lastLimit)
+	}
+}
+
+// ── muninn_read_batch ────────────────────────────────────────────────────────
+
+// readBatchEngine returns populated content for known IDs and an empty
+// ReadResponse for unknown ones (so handler classifies them as missing).
+type readBatchEngine struct{ fakeEngine }
+
+func (e *readBatchEngine) Read(_ context.Context, req *mbp.ReadRequest) (*mbp.ReadResponse, error) {
+	if req.ID == "id-found-1" || req.ID == "id-found-2" {
+		return &mbp.ReadResponse{
+			ID:      req.ID,
+			Concept: "concept for " + req.ID,
+			Content: "body for " + req.ID,
+		}, nil
+	}
+	return &mbp.ReadResponse{}, nil
+}
+
+func TestHandleReadBatch_HappyPath(t *testing.T) {
+	srv := newTestServerWith(&readBatchEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_read_batch","arguments":{"vault":"default","ids":["id-found-1","id-missing","id-found-2"]}}}`
+	w := postRPC(t, srv, body)
+	content := extractInnerJSON(t, decodeResp(t, w.Body.String()))
+
+	found, _ := content["found"].(float64)
+	if int(found) != 2 {
+		t.Errorf("expected found=2, got %v", content["found"])
+	}
+	memories, _ := content["memories"].([]any)
+	if len(memories) != 2 {
+		t.Fatalf("expected 2 memories, got %d", len(memories))
+	}
+	missing, _ := content["missing"].([]any)
+	if len(missing) != 1 {
+		t.Errorf("expected 1 missing, got %d (%v)", len(missing), missing)
+	}
+}
+
+func TestHandleReadBatch_EmptyIDs(t *testing.T) {
+	srv := newTestServerWith(&readBatchEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_read_batch","arguments":{"vault":"default","ids":[]}}}`
+	w := postRPC(t, srv, body)
+	content := extractInnerJSON(t, decodeResp(t, w.Body.String()))
+	if found, _ := content["found"].(float64); int(found) != 0 {
+		t.Errorf("expected found=0, got %v", content["found"])
+	}
+}
+
+func TestHandleReadBatch_MissingIDsParam(t *testing.T) {
+	srv := newTestServerWith(&readBatchEngine{})
+	body := `{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"muninn_read_batch","arguments":{"vault":"default"}}}`
+	w := postRPC(t, srv, body)
+	resp := decodeResp(t, w.Body.String())
+	if resp.Error == nil || resp.Error.Code != -32602 {
+		t.Errorf("expected -32602 for missing ids, got %v", resp.Error)
 	}
 }
 

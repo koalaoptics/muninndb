@@ -920,33 +920,100 @@ func (s *MCPServer) handleFindByEntity(ctx context.Context, w http.ResponseWrite
 	if offset < 0 {
 		offset = 0
 	}
+	includeContent, _ := args["include_content"].(bool)
 	result, err := s.engine.FindByEntity(ctx, vault, entityName, limit, offset)
 	if err != nil {
 		sendError(w, id, -32000, "tool error: "+err.Error())
 		return
 	}
+	// engramEntry's hydrated fields are populated only when include_content=true.
+	// They use omitempty so the default (lean) shape is byte-identical to the
+	// pre-Sprint-7 response — backward-compatible for every existing caller.
 	type engramEntry struct {
-		ID      string `json:"id"`
-		Concept string `json:"concept"`
-		Summary string `json:"summary,omitempty"`
-		State   string `json:"state"`
+		ID         string  `json:"id"`
+		Concept    string  `json:"concept"`
+		Summary    string  `json:"summary,omitempty"`
+		State      string  `json:"state"`
+		Content    string  `json:"content,omitempty"`
+		Confidence float32 `json:"confidence,omitempty"`
+		CreatedAt  string  `json:"created_at,omitempty"`
+		UpdatedAt  string  `json:"updated_at,omitempty"`
 	}
 	entries := make([]engramEntry, 0, len(result.Engrams))
 	for _, e := range result.Engrams {
-		entries = append(entries, engramEntry{
+		entry := engramEntry{
 			ID:      e.ID.String(),
 			Concept: e.Concept,
 			Summary: e.Summary,
 			State:   lifecycleStateLabel(e.State),
-		})
+		}
+		if includeContent {
+			// engine.FindByEntity already hydrated each storage.Engram via GetEngram,
+			// so widening the response is free — no extra DB round-trip.
+			entry.Content = e.Content
+			entry.Confidence = e.Confidence
+			if !e.CreatedAt.IsZero() {
+				entry.CreatedAt = e.CreatedAt.UTC().Format(time.RFC3339Nano)
+			}
+			if !e.UpdatedAt.IsZero() {
+				entry.UpdatedAt = e.UpdatedAt.UTC().Format(time.RFC3339Nano)
+			}
+		}
+		entries = append(entries, entry)
 	}
 	out, _ := json.Marshal(map[string]any{
-		"entity":  entityName,
-		"engrams": entries,
-		"count":   len(entries),
-		"total":   result.Total,
-		"offset":  offset,
-		"limit":   limit,
+		"entity":          entityName,
+		"engrams":         entries,
+		"count":           len(entries),
+		"total":           result.Total,
+		"offset":          offset,
+		"limit":           limit,
+		"include_content": includeContent,
+	})
+	sendResult(w, id, textContent(string(out)))
+}
+
+// handleReadBatch hydrates a list of memory IDs in a single call, eliminating
+// the find-then-N-reads pattern that dominated Sprint 5/6 scan time.
+//
+// Missing IDs are omitted from the response (not errored), so callers can
+// tolerate stale ID lists without a per-ID try/catch loop. Cap is 500 per
+// call — same as muninn_find_by_entity's max page size.
+func (s *MCPServer) handleReadBatch(ctx context.Context, w http.ResponseWriter, id json.RawMessage, vault string, args map[string]any) {
+	rawIDs, ok := args["ids"].([]any)
+	if !ok {
+		sendError(w, id, -32602, "invalid params: 'ids' must be an array of strings")
+		return
+	}
+	if len(rawIDs) == 0 {
+		out, _ := json.Marshal(map[string]any{"memories": []any{}, "found": 0, "missing": []any{}})
+		sendResult(w, id, textContent(string(out)))
+		return
+	}
+	if len(rawIDs) > 500 {
+		sendError(w, id, -32602, "invalid params: 'ids' length exceeds max 500 per batch")
+		return
+	}
+
+	memories := make([]Memory, 0, len(rawIDs))
+	missing := make([]string, 0)
+	for _, raw := range rawIDs {
+		s2, ok := raw.(string)
+		if !ok || s2 == "" {
+			continue
+		}
+		resp, err := s.engine.Read(ctx, &mbp.ReadRequest{ID: s2, Vault: vault})
+		if err != nil || resp == nil || resp.ID == "" {
+			missing = append(missing, s2)
+			continue
+		}
+		memories = append(memories, readResponseToMemory(resp))
+	}
+
+	out, _ := json.Marshal(map[string]any{
+		"memories": memories,
+		"found":    len(memories),
+		"missing":  missing,
 	})
 	sendResult(w, id, textContent(string(out)))
 }

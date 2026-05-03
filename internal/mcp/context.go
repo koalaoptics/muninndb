@@ -188,6 +188,7 @@ func isReadOnlyTool(name string) bool {
 	switch name {
 	case "muninn_recall",
 		"muninn_read",
+		"muninn_read_batch",
 		"muninn_status",
 		"muninn_session",
 		"muninn_contradictions",
