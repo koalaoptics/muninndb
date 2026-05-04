@@ -8,6 +8,14 @@ primary_region = "ewr"
   source = "muninndb_data"
   destination = "/data"
 
+[env]
+  # B3-MUN-002 fix: trust Fly's edge-injected client IP headers in clientIP().
+  # Required for per-IP rate limiting to function on Fly.io. Without this,
+  # r.RemoteAddr is the Fly edge proxy IP (a small fixed set), so the per-IP
+  # LRU collapses to a single global bucket. Fly-Client-IP is non-spoofable
+  # behind force_https=true (set above).
+  MUNINN_TRUST_PROXY = "1"
+
 [http_service]
   internal_port = 8750
   force_https = true
