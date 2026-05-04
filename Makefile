@@ -14,19 +14,31 @@ ORT_BASE    := https://github.com/microsoft/onnxruntime/releases/download/v$(ORT
 fetch-assets: fetch-model fetch-ort-libs
 
 ## fetch-model: download model_int8.onnx and tokenizer.json from HuggingFace.
+##
+## Idempotent: skips the download if both files already exist non-empty in
+## $(ASSETS_DIR). This lets the Docker build pick up files prefetched into the
+## build context — useful when the builder's egress to huggingface.co is
+## flaky (Depot regional issues, TLS resets, rate-limit windows). Override
+## with `make fetch-model FORCE=1` to redownload regardless.
 fetch-model:
-	@echo "==> Downloading bge-small-en-v1.5 INT8 model..."
 	@mkdir -p $(ASSETS_DIR)
-	@curl -fL --progress-bar \
-		"$(HF_BASE)/onnx/model_int8.onnx" \
-		-o "$(ASSETS_DIR)/model_int8.onnx"
-	@echo "==> Downloading tokenizer.json..."
-	@curl -fL --progress-bar \
-		"https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/tokenizer.json" \
-		-o "$(ASSETS_DIR)/tokenizer.json"
-	@echo "    model_int8.onnx: $$(du -sh $(ASSETS_DIR)/model_int8.onnx | cut -f1)"
-	@echo "    tokenizer.json:  $$(du -sh $(ASSETS_DIR)/tokenizer.json  | cut -f1)"
-	@echo "==> Model assets ready."
+	@if [ -z "$(FORCE)" ] && [ -s "$(ASSETS_DIR)/model_int8.onnx" ] && [ -s "$(ASSETS_DIR)/tokenizer.json" ]; then \
+		echo "==> Model assets already present, skipping download."; \
+		echo "    model_int8.onnx: $$(du -sh $(ASSETS_DIR)/model_int8.onnx | cut -f1)"; \
+		echo "    tokenizer.json:  $$(du -sh $(ASSETS_DIR)/tokenizer.json  | cut -f1)"; \
+	else \
+		echo "==> Downloading bge-small-en-v1.5 INT8 model..."; \
+		curl -fL --progress-bar --retry 5 --retry-all-errors --retry-delay 3 \
+			"$(HF_BASE)/onnx/model_int8.onnx" \
+			-o "$(ASSETS_DIR)/model_int8.onnx"; \
+		echo "==> Downloading tokenizer.json..."; \
+		curl -fL --progress-bar --retry 5 --retry-all-errors --retry-delay 3 \
+			"https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/tokenizer.json" \
+			-o "$(ASSETS_DIR)/tokenizer.json"; \
+		echo "    model_int8.onnx: $$(du -sh $(ASSETS_DIR)/model_int8.onnx | cut -f1)"; \
+		echo "    tokenizer.json:  $$(du -sh $(ASSETS_DIR)/tokenizer.json  | cut -f1)"; \
+		echo "==> Model assets ready."; \
+	fi
 
 ## fetch-ort-libs: download ORT native libraries for all supported platforms.
 fetch-ort-libs:
@@ -61,15 +73,19 @@ _ort-darwin-amd64:
 	@echo "    darwin/amd64: $$(du -sh $(ASSETS_DIR)/libonnxruntime_darwin_amd64.dylib | cut -f1)"
 
 _ort-linux-amd64:
-	@echo "    Fetching linux/amd64..."
-	@curl -fL --progress-bar \
-		"$(ORT_BASE)/onnxruntime-linux-x64-$(ORT_VERSION).tgz" \
-		-o "/tmp/ort-linux-amd64.tgz"
-	@tar -xzf /tmp/ort-linux-amd64.tgz -C /tmp onnxruntime-linux-x64-$(ORT_VERSION)/lib/libonnxruntime.so.$(ORT_VERSION) 2>/dev/null || \
-		tar -xzf /tmp/ort-linux-amd64.tgz -C /tmp --strip-components=2 --wildcards '*/lib/libonnxruntime.so.*'
-	@cp /tmp/onnxruntime-linux-x64-$(ORT_VERSION)/lib/libonnxruntime.so.$(ORT_VERSION) $(ASSETS_DIR)/libonnxruntime_linux_amd64.so 2>/dev/null || \
-		find /tmp -name 'libonnxruntime.so.*' | head -1 | xargs -I{} cp {} $(ASSETS_DIR)/libonnxruntime_linux_amd64.so
-	@echo "    linux/amd64: $$(du -sh $(ASSETS_DIR)/libonnxruntime_linux_amd64.so | cut -f1)"
+	@if [ -z "$(FORCE)" ] && [ -s "$(ASSETS_DIR)/libonnxruntime_linux_amd64.so" ]; then \
+		echo "    linux/amd64: already present ($$(du -sh $(ASSETS_DIR)/libonnxruntime_linux_amd64.so | cut -f1)), skipping download."; \
+	else \
+		echo "    Fetching linux/amd64..."; \
+		curl -fL --progress-bar --retry 5 --retry-all-errors --retry-delay 3 \
+			"$(ORT_BASE)/onnxruntime-linux-x64-$(ORT_VERSION).tgz" \
+			-o "/tmp/ort-linux-amd64.tgz"; \
+		tar -xzf /tmp/ort-linux-amd64.tgz -C /tmp onnxruntime-linux-x64-$(ORT_VERSION)/lib/libonnxruntime.so.$(ORT_VERSION) 2>/dev/null || \
+			tar -xzf /tmp/ort-linux-amd64.tgz -C /tmp --strip-components=2 --wildcards '*/lib/libonnxruntime.so.*'; \
+		cp /tmp/onnxruntime-linux-x64-$(ORT_VERSION)/lib/libonnxruntime.so.$(ORT_VERSION) $(ASSETS_DIR)/libonnxruntime_linux_amd64.so 2>/dev/null || \
+			find /tmp -name 'libonnxruntime.so.*' | head -1 | xargs -I{} cp {} $(ASSETS_DIR)/libonnxruntime_linux_amd64.so; \
+		echo "    linux/amd64: $$(du -sh $(ASSETS_DIR)/libonnxruntime_linux_amd64.so | cut -f1)"; \
+	fi
 
 _ort-linux-arm64:
 	@echo "    Fetching linux/arm64..."

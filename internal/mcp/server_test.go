@@ -52,6 +52,9 @@ func (f *fakeEngine) GetContradictions(ctx context.Context, vault string) ([]Con
 func (f *fakeEngine) Evolve(ctx context.Context, vault, oldID, newContent, reason string, embedding []float32) (*WriteResult, error) {
 	return &WriteResult{ID: "new-id"}, nil
 }
+func (f *fakeEngine) UpdateContent(ctx context.Context, vault, id, newContent, reason string, newConfidence float32) (*WriteResult, error) {
+	return &WriteResult{ID: id}, nil
+}
 func (f *fakeEngine) Consolidate(ctx context.Context, vault string, ids []string, merged string) (*ConsolidateResult, error) {
 	return &ConsolidateResult{ID: "merged-id"}, nil
 }
@@ -278,8 +281,8 @@ func TestListTools(t *testing.T) {
 	var result map[string]any
 	json.NewDecoder(w.Body).Decode(&result)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 38 {
-		t.Errorf("expected 38 tools, got %d", len(tools))
+	if len(tools) != 40 {
+		t.Errorf("expected 40 tools, got %d", len(tools))
 	}
 }
 
