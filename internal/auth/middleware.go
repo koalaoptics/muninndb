@@ -218,9 +218,42 @@ func extractVaultFromRequestBody(r *http.Request) (string, error) {
 		return "", nil
 	}
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read request body for vault routing")
+	// B3-MUN-001 mitigation: bound pre-auth body work for unauthenticated
+	// requests.
+	//
+	// VaultAuthMiddleware runs resolveRequestVault BEFORE Bearer-token
+	// validation, so an unauthenticated attacker would otherwise force the
+	// server to buffer up to the global bodySizeMiddleware limit (4 MB)
+	// and parse arbitrary JSON before the 401 fires. Combined with
+	// B3-MUN-002 (rate-limit collapse on Fly.io), one attacker IP can
+	// exhaust the whole instance.
+	//
+	// Mitigation: if NO Bearer token is present (the only case where the
+	// vault-routing read is "pre-auth" in the DoS sense), cap the read at
+	// 64 KB — large enough for any legitimate vault-routing envelope but
+	// bounded enough to defang JSON-bomb amplification.
+	//
+	// Requests WITH a Bearer token still pass through with the full
+	// bodySizeMiddleware limit, because the auth check downstream gates
+	// any meaningful work and large-batch authenticated writes are a
+	// normal usage pattern.
+	const preAuthBodyCap = 64 * 1024
+	bearerPresent := strings.HasPrefix(strings.TrimSpace(r.Header.Get("Authorization")), "Bearer ")
+	var body []byte
+	var err error
+	if bearerPresent {
+		body, err = io.ReadAll(r.Body)
+		if err != nil {
+			return "", fmt.Errorf("failed to read request body for vault routing")
+		}
+	} else {
+		body, err = io.ReadAll(io.LimitReader(r.Body, preAuthBodyCap+1))
+		if err != nil {
+			return "", fmt.Errorf("failed to read request body for vault routing")
+		}
+		if len(body) > preAuthBodyCap {
+			return "", fmt.Errorf("request body exceeds pre-auth size cap; authenticate first or send a smaller body")
+		}
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	trimmedBody := bytes.TrimSpace(body)

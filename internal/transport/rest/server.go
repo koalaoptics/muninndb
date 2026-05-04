@@ -1053,10 +1053,49 @@ func newRateLimitMiddleware(global *rate.Limiter, ipCache *lru.Cache[string, *ra
 	}
 }
 
-// clientIP returns the direct TCP peer IP from r.RemoteAddr with the port
-// stripped. Proxy headers (X-Forwarded-For, X-Real-IP) are intentionally
-// ignored because they are attacker-controlled without a trusted proxy list.
+// clientIP returns the client IP for rate-limiting purposes.
+//
+// By default it returns the direct TCP peer IP from r.RemoteAddr with the
+// port stripped. Proxy headers are ignored because they are attacker-
+// controlled without a trusted proxy list.
+//
+// When MUNINN_TRUST_PROXY=1 (set by deployments behind a trusted reverse
+// proxy), the function instead trusts platform-injected client-IP headers
+// in the following precedence:
+//
+//	Fly-Client-IP    (Fly.io edge — non-spoofable when behind force_https)
+//	X-Real-IP        (nginx, generic reverse proxies)
+//	X-Forwarded-For  (first IP only — last fallback, weakest guarantee)
+//
+// This resolves B3-MUN-002: on Fly.io, r.RemoteAddr is the Fly edge IP
+// (a small fixed set), so the per-IP LRU collapses to a single global
+// bucket and one attacker IP can consume the whole limit.
+//
+// The trust gate is opt-in (env-flag) and SHOULD only be enabled in
+// deployments where the proxy is actually validated. Document the trust
+// boundary in deploy docs.
+var trustProxyHeaders = strings.EqualFold(strings.TrimSpace(os.Getenv("MUNINN_TRUST_PROXY")), "1")
+
 func clientIP(r *http.Request) string {
+	if trustProxyHeaders {
+		// Fly-Client-IP is set by Fly's edge and is not spoofable from the
+		// outside when force_https is on. Cheapest, most reliable header
+		// when present.
+		if v := strings.TrimSpace(r.Header.Get("Fly-Client-IP")); v != "" {
+			return v
+		}
+		if v := strings.TrimSpace(r.Header.Get("X-Real-IP")); v != "" {
+			return v
+		}
+		if v := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); v != "" {
+			// XFF is comma-separated; the leftmost entry is the original
+			// client per RFC 7239 §5.2.
+			if comma := strings.IndexByte(v, ','); comma >= 0 {
+				return strings.TrimSpace(v[:comma])
+			}
+			return v
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
